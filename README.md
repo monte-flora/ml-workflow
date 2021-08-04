@@ -15,8 +15,6 @@ imblearn
 ```
 
 ### Using ml_workflow 
-
-
 ```python
 # Add the top of the ml_workflow directory to your system path. 
 # Eventually, I will create a setup.py. 
@@ -25,6 +23,18 @@ sys.path.append('/path to /ml_workflow')
 
 from ml_workflow import CalibratedPipelineHyperOptCV
 ```
+
+This is an example for training a random forest for predicting sub-freezing road surface temperatures. 
+Our goal is to optimize a random forest by finding the optimal hyperparameters and then calibrating it. 
+The following code with create an ML pipeline internally to pre-process the data (imputations, scaling, 
+resampling, pca transformation). Next, it uses a Bayesian approach to determine hyperparameters in a 
+cross-validation framework. CalibratedPipelineHyperOptCV is capable of a date-based cross-validation 
+where we would want to account for autocorrelations between different dates. E.g., Data from one date 
+should not also be in both the training and validation dates. In this example, I'm using 5-fold cross-validation
+where I want at least 30 dates worth of data per validation fold. 
+
+The optimal hyperparameters uses a loss metric, which is defined by the end-user. In this example, 
+I'm using the normalized critical success index. 
 
 
 ```python
@@ -47,6 +57,7 @@ def norm_csi_scorer(model, X, y, **kwargs):
     score = norm_csi(y, predictions, known_skew=known_skew)
     return 1.0 - score
 
+dates = train_df['date']
 
 clf = CalibratedPipelineHyperOptCV( estimator = estimator,  
                                     param_grid = param_grid,
@@ -55,11 +66,11 @@ clf = CalibratedPipelineHyperOptCV( estimator = estimator,
                                     resample='under',
                                     n_jobs=3,
                                     max_iter=10,
-                                  hyperopt='atpe', 
-                                  n_jobs=3,
-                                  scorer=scorer, 
-                                  scorer_kwargs = {'known_skew': known_skew}, 
-                                  cross_val = 'date_based', 
-                                  cross_val_kwargs = {'n_splits' : 5, 'cross_val_column' : months},
+                                    hyperopt='atpe', 
+                                    n_jobs=3,
+                                    scorer=scorer, 
+                                    scorer_kwargs = {'known_skew': known_skew}, 
+                                    cross_val = 'date_based', 
+                                    cross_val_kwargs = {'n_splits' : 5, 'dates' : dates, 'valid_size' : 30},
                                   )
 ```
