@@ -20,7 +20,7 @@ sys.path.append('/Users/monte.flora/Desktop/PHD_PLOTS')
 from .common.calibration import CalibratedClassifierCV
 from .preprocess.preprocess import PreProcessPipeline
 from .io.cross_validation_generator import DateBasedCV
-from ml_methods import norm_aupdc, norm_csi
+from .ml_methods import norm_aupdc, norm_csi
 from .my_hyperopt.hyperopt.early_stop import no_progress_loss
 from .my_hyperopt.hyperopt import fmin, tpe, atpe, hp, SparkTrials, STATUS_OK, Trials,space_eval
 from imblearn.under_sampling import RandomUnderSampler
@@ -120,11 +120,19 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         cross_val : ``date_based`` or ``kfold``. 
                 
         cross_val_kwargs : dict 
-            - n_splits, Number of cross-validation folds 
+            - n_splits : int
+                Number of cross-validation folds 
             
-            - cross_val_column,  Used for date-based cross-validation generation 
-            that recognize the autocorrelation within meteorological data. This column could
-            days, month, etc. 
+            - dates,  shape = (n_samples,)
+                Used for date-based cross-validation generation 
+                that recognize the autocorrelation within meteorological data. This column could
+                days, month, etc. shape = (n_samples,)
+            
+            - valid_size : int or float between 0 and 1
+                If int, then interpreted as the number of dates to include 
+                in each validation dataset. E,g, if valid_size=5 and 
+                dates is months, then each validation dataset will 
+                include 5 months 
             
             
     Attributes:
@@ -216,7 +224,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
                     }
         
         joblib.dump(model_dict, fname)
-        
+
     def _convert_param_grid(self, param_grid):
         return {f'base_estimator__model__{p}': hp.choice(p, values) for p,values in param_grid.items()}
 
@@ -243,11 +251,12 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         # INITIALIZE MY CUSTOM CV SPLIT GENERATOR
         n_splits = self.cross_val_kwargs.get('n_splits')
         if self.cross_val == 'date_based':
-            dates = self.cross_val_kwargs.get('cross_val_column', None)
+            dates = self.cross_val_kwargs.get('dates', None)
+            valid_size = self.cross_val_kwargs.get('valid_size', None)
             if dates is None:
                 raise KeyError('When using cross_val = "date_based", must provide a date column in cross_val_kwargs')
             else:
-                self.cv = DateBasedCV(n_splits=n_splits, dates=dates, y=self.y)
+                self.cv = DateBasedCV(n_splits=n_splits, dates=dates, y=self.y, valid_size=valid_size)
         else:
             self.cv = KFold(n_splits=n_splits)
             
