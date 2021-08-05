@@ -140,7 +140,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         estimator_ : a fit classifier model 
 
     """
-    def __init__(self, estimator, param_grid, imputer='simple', scaler='standard', 
+    def __init__(self, estimator, param_grid, imputer='simple', scaler=None, 
                 resample = None, local_dir=os.getcwd(), n_jobs=1, max_iter=10, 
                 scorer=norm_csi_scorer, cross_val='kfolds', cross_val_kwargs={'n_splits': 5}, 
                  hyperopt='atpe', scorer_kwargs={},):
