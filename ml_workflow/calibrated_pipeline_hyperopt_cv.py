@@ -190,7 +190,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         """
         self.known_skew = np.mean(y)
         self.X = X
-        self.y= y 
+        self.y = y 
         self.init_cv()
     
         self.estimator_ = CalibratedClassifierCV(self.pipe, 
@@ -201,21 +201,20 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self._find_best_params()
         
         # Fit the model with the optimal hyperparamters
-        this_estimator = clone(self.estimator_)
-        this_estimator.set_params(**self.best_params)
-        this_estimator.fit(self.X, self.y)
-        self.estimator_ = this_estimator
+        self.final_estimator_ = clone(self.estimator_)
+        self.final_estimator_.set_params(**self.best_params)
+        self.final_estimator_.fit(X, y)
         
         if self.hyperparam_result_fname is not None:
             self.convert_tuning_results(self.hyperparam_result_fname)
         
     def predict_proba(self,X):
-        return self.estimator_.predict_proba(X)
+        return self.final_estimator_.predict_proba(X)
     
    
     def save(self, fname):
         model_dict = {
-                    'model' : self.estimator_,
+                    'model' : self.final_estimator_,
                     'features': list(self.X.columns),
                     'n_features':len(list(self.X.columns)),
                     'resample' : self.resample,
@@ -294,8 +293,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.ITERATION += 1
         start = timer()
         
-        this_estimator = clone(self.estimator_)
-        
+        this_estimator = clone(self.estimator_)       
         this_estimator.set_params(**params)
 
         # Perform n_folds cross validation
