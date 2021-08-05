@@ -9,7 +9,9 @@ import os
 from imblearn.pipeline import Pipeline
 from sklearn.base import (BaseEstimator, ClassifierMixin, RegressorMixin, clone,
                    MetaEstimatorMixin)
+from sklearn.utils.validation import check_is_fitted, check_consistent_length
 from sklearn.model_selection import KFold
+from sklearn.utils import check_X_y, check_array, indexable, column_or_1d
 import joblib
 from timeit import default_timer as timer
 import ast
@@ -52,8 +54,8 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
     
     Parameters:
     ---------------------------
-        estimator : unfitted callable classifier (likely from scikit-learn) 
-                    that implements ``fit`` and ``predict_proba`` methods
+        base_estimator : unfit callable classifier or regressor (likely from scikit-learn) 
+                    that implements a ``fit`` method. 
         
         param_grid : dict of hyperparameters and the grid to search over. 
         
@@ -140,7 +142,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         estimator_ : a fit classifier model 
 
     """
-    def __init__(self, estimator, param_grid, imputer='simple', scaler=None, 
+    def __init__(self, base_estimator, param_grid, imputer='simple', scaler=None, 
                 resample = None, local_dir=os.getcwd(), n_jobs=1, max_iter=10, 
                 scorer=norm_csi_scorer, cross_val='kfolds', cross_val_kwargs={'n_splits': 5}, 
                  hyperopt='atpe', scorer_kwargs={},):
@@ -148,12 +150,16 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.imputer = imputer
         self.scaler = scaler
         self.resample = resample
+        self.hyperopt = hyperopt
+        self.local_dir = local_dir
         # Build components of the pipeline 
         steps = self.bulid_pipeline()
-        steps.append(('model', estimator))
+        self.base_estimator = base_estimator
+        steps.append(('model', base_estimator))
         
          # INITIALIZE THE PIPELINE 
         self.pipe = Pipeline(steps)
+        
         self.algo=atpe.suggest if hyperopt == 'atpe' else tpe.suggest
         
         self.cross_val = cross_val 
@@ -176,7 +182,6 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
             # Write the headers to the file
             self.writer.writerow(['loss', 'params', 'iteration', 'train_time'])
             of_connection.close()
-    
     
     def fit(self, X, y):
         """
@@ -201,9 +206,14 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self._find_best_params()
         
         # Fit the model with the optimal hyperparamters
-        self.final_estimator_ = clone(self.estimator_)
-        self.final_estimator_.set_params(**self.best_params)
-        self.final_estimator_.fit(X, y)
+        this_estimator = CalibratedClassifierCV(self.pipe, 
+                                                 cv=self.cv, 
+                                                 method='isotonic', 
+                                                 n_jobs=self.n_jobs)
+        
+        this_estimator.set_params(**self.best_params)
+        refit_estimator = this_estimator.fit(X, y)
+        self.final_estimator_ = refit_estimator
         
         
         if self.hyperparam_result_fname is not None:
@@ -212,6 +222,10 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.writer = 0
         
     def predict_proba(self,X):
+        check_is_fitted(self)
+        X = check_array(X, accept_sparse=['csc', 'csr', 'coo'],
+                        force_all_finite=False)
+        
         return self.final_estimator_.predict_proba(X)
     
    
