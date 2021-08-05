@@ -205,8 +205,11 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.final_estimator_.set_params(**self.best_params)
         self.final_estimator_.fit(X, y)
         
+        
         if self.hyperparam_result_fname is not None:
             self.convert_tuning_results(self.hyperparam_result_fname)
+        
+        self.writer = 0
         
     def predict_proba(self,X):
         return self.final_estimator_.predict_proba(X)
