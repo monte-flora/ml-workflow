@@ -201,9 +201,11 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self._find_best_params()
         
         # Fit the model with the optimal hyperparamters
-        self.estimator_.set_params(**self.best_params)
-        self.estimator_.fit(self.X, self.y)
-
+        this_estimator = clone(self.estimator_)
+        this_estimator.set_params(**self.best_params)
+        this_estimator.fit(self.X, self.y)
+        self.estimator_ = this_estimator
+        
         if self.hyperparam_result_fname is not None:
             self.convert_tuning_results(self.hyperparam_result_fname)
         
@@ -228,7 +230,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
     def _convert_param_grid(self, param_grid):
         return {f'base_estimator__model__{p}': hp.choice(p, values) for p,values in param_grid.items()}
 
-    def _find_best_params(self,):
+    def _find_best_params(self, ):
         """Find the best hyperparameters using the hyperopt package"""
         # Using early stopping in the error minimization. Need to have 1% drop in loss every 8-10 count (varies)
         best = fmin(self.objective,
