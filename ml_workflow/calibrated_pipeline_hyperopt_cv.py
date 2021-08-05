@@ -214,7 +214,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
    
     def save(self, fname):
         model_dict = {
-                    'model' : self.final_estimator_,
+                    'model' : self,
                     'features': list(self.X.columns),
                     'n_features':len(list(self.X.columns)),
                     'resample' : self.resample,
