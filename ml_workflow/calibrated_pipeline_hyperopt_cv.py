@@ -12,15 +12,20 @@ from sklearn.base import (BaseEstimator, ClassifierMixin, RegressorMixin, clone,
 from sklearn.utils.validation import check_is_fitted, check_consistent_length
 from sklearn.model_selection import KFold
 from sklearn.utils import check_X_y, check_array, indexable, column_or_1d
+
+from sklearn.preprocessing import label_binarize, LabelBinarizer, LabelEncoder
+from sklearn.utils.validation import check_is_fitted, check_consistent_length
+from sklearn.utils.validation import _check_sample_weight
+from sklearn.isotonic import IsotonicRegression
+from sklearn.svm import LinearSVC
+from sklearn.model_selection import check_cv
+
 import joblib
 from joblib import delayed, Parallel
 from timeit import default_timer as timer
 import ast
+import itertools
 
-import sys
-sys.path.append('/Users/monte.flora/Desktop/PHD_PLOTS')
-
-from sklearn.calibration import CalibratedClassifierCV
 from .preprocess.preprocess import PreProcessPipeline
 from .io.cross_validation_generator import DateBasedCV
 from .ml_methods import norm_aupdc, norm_csi
@@ -47,7 +52,10 @@ def norm_csi_scorer(model, X, y, **kwargs):
 
 def _fit(estimator, X, y): 
     return estimator.fit(X, y)
-          
+
+def _predict(estimator,X,y):
+    return (estimator.predict_proba(X)[:,1], y)
+
 class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
                              MetaEstimatorMixin):
     """
@@ -122,9 +130,9 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
                 - ``tpe`` Tree of Parzen Estimators (TPE)
                 - ``atpe`` Adaptive TPE
         
-        cross_val : ``date_based`` or ``kfold``. 
+        cv : ``date_based`` or ``kfold``. 
                 
-        cross_val_kwargs : dict 
+        cv_kwargs : dict 
             - n_splits : int
                 Number of cross-validation folds 
             
@@ -145,11 +153,12 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         estimator_ : a fit classifier model 
 
     """
-    def __init__(self, base_estimator, param_grid, imputer='simple', scaler=None, 
+    def __init__(self, base_estimator, param_grid, cal_method='isotonic', imputer='simple', scaler=None, 
                 resample = None, local_dir=os.getcwd(), n_jobs=1, max_iter=15, 
-                scorer=norm_csi_scorer, cross_val='kfolds', cross_val_kwargs={'n_splits': 5}, 
+                scorer=norm_csi_scorer, cv='kfolds', cv_kwargs={'n_splits': 5}, 
                  hyperopt='atpe', scorer_kwargs={},):
         
+        self.cal_method = cal_method
         self.imputer = imputer
         self.scaler = scaler
         self.resample = resample
@@ -165,8 +174,8 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         
         self.algo=atpe.suggest if hyperopt == 'atpe' else tpe.suggest
         
-        self.cross_val = cross_val 
-        self.cross_val_kwargs = cross_val_kwargs
+        self.cv = cv 
+        self.cv_kwargs = cv_kwargs
         self.scorer_kwargs = scorer_kwargs
         self.n_jobs = n_jobs
         self.param_grid = self._convert_param_grid(param_grid)
@@ -196,36 +205,113 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
             y, shape: (n_samples, )
         
         """
+        X, y = check_X_y(X, y, accept_sparse=['csc', 'csr', 'coo'],
+                         force_all_finite=False, allow_nd=True)
+        X, y = indexable(X, y)
+        le = LabelBinarizer().fit(y)
+        self.classes_ = le.classes_
         self.known_skew = np.mean(y)
         self.X = X
         self.y = y 
         self.init_cv()
         
+        # Check that each cross-validation fold can have at least one
+        # example per class
+        n_folds = self.cv if isinstance(self.cv, int) \
+            else self.cv.n_folds if hasattr(self.cv, "n_folds") else None
+        if n_folds and \
+                np.any([np.sum(y == class_) < n_folds for class_ in
+                        self.classes_]):
+            raise ValueError("Requesting %d-fold cross-validation but provided"
+                             " less than %d examples for at least one class."
+                             % (n_folds, n_folds))
+
+        self.calibrated_classifiers_ = []
+        cv = check_cv(self.cv, y, classifier=True)
+        
+        # Perform cross validation on the base estimator (no calibration!) 
         self._find_best_params()
-        
-        this_estimator = CalibratedClassifierCV(base_estimator=self.pipe, 
-                                                 cv=self.cv, 
-                                                 method='isotonic', 
-                                                 n_jobs=self.n_jobs, 
-                                                ensemble=False)
-        
+
         # Fit the model with the optimal hyperparamters
-        best_params = {f'base_estimator__model__{p}' : v for p,v in self.best_params.items()} 
-        this_estimator.set_params(**best_params)
-        refit_estimator = this_estimator.fit(X, y)
-        self.final_estimator_ = refit_estimator
+        parallel = Parallel(n_jobs=self.n_jobs)
+        this_base_estimator = clone(self.pipe) 
+        #best_params = {f'base_estimator__model__{p}' : v for p,v in self.best_params.items()} 
+        this_base_estimator.named_steps['model'].set_params(**self.best_params)
         
+        # Perform cross validation on the base estimator/pipeline (no calibration!) 
+        fit_estimators_ = parallel(delayed(
+                _fit)(clone(this_base_estimator),self.X[train], self.y[train]) for train, _ in self.cv.split(self.X,self.y))
+        
+        results = parallel(delayed(
+                _predict)(estimator , X[test], y[test]) for estimator, (_, test) in zip(fit_estimators_, self.cv.split(X,y)))
+
+        cv_predictions = [item[0] for item in results ]
+        cv_targets = [item[1] for item in results ]
+
+        cv_predictions =  list(itertools.chain.from_iterable(cv_predictions))
+        cv_targets =  list(itertools.chain.from_iterable(cv_targets))
+
+        # Re-fit base_estimator/pipeline on the whole dataset
+        this_estimator = clone(self.pipe)
+        refit_estimator = this_estimator.fit(X,y)
+
+        calibrated_classifier = _CalibratedClassifier(
+                    refit_estimator, method=self.cal_method,
+                    classes=self.classes_)
+
+        # Fit the isotonic regression model. 
+        calibrated_classifier.fit(cv_predictions, cv_targets)
+        self.calibrated_classifiers_.append(calibrated_classifier)
+
         if self.hyperparam_result_fname is not None:
             self.convert_tuning_results(self.hyperparam_result_fname)
         
         self.writer = 0
         
-    def predict_proba(self,X):
+        return self
+        
+    def predict_proba(self, X):
+        """Posterior probabilities of classification
+
+        This function returns posterior probabilities of classification
+        according to each class on an array of test vectors X.
+
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            The samples.
+
+        Returns
+        -------
+        C : array, shape (n_samples, n_classes)
+            The predicted probas.
+        """
         check_is_fitted(self)
         X = check_array(X, accept_sparse=['csc', 'csr', 'coo'],
                         force_all_finite=False)
+
+        calibrated_classifier = self.calibrated_classifiers_[0]
+        return calibrated_classifier.predict_proba(X)
+    
+    def predict(self, X):
+        """Predict the target of new samples. Can be different from the
+        prediction of the uncalibrated classifier.
+
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            The samples.
+
+        Returns
+        -------
+        C : array, shape (n_samples,)
+            The predicted class.
+        """
+        check_is_fitted(self)
         
-        return self.final_estimator_.predict_proba(X)
+        calibrated_classifier = self.calibrated_classifiers_[0]
+        
+        return self.classes_[np.argmax(calibrated_classifier.predict_proba(X), axis=1)]
     
    
     def save(self, fname):
@@ -265,17 +351,18 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
     def init_cv(self,):
         """Initialize the cross-validation generator"""
         # INITIALIZE MY CUSTOM CV SPLIT GENERATOR
-        n_splits = self.cross_val_kwargs.get('n_splits')
-        if self.cross_val == 'date_based':
-            dates = self.cross_val_kwargs.get('dates', None)
-            valid_size = self.cross_val_kwargs.get('valid_size', None)
+        n_splits = self.cv_kwargs.get('n_splits')
+        if self.cv == 'date_based':
+            dates = self.cv_kwargs.get('dates', None)
+            valid_size = self.cv_kwargs.get('valid_size', None)
             if dates is None:
-                raise KeyError('When using cross_val = "date_based", must provide a date column in cross_val_kwargs')
+                raise KeyError('When using cv = "date_based", must provide a date column in cv_kwargs')
             else:
                 self.cv = DateBasedCV(n_splits=n_splits, dates=dates, y=self.y, valid_size=valid_size)
-        else:
+        elif self.cv =='kfolds':
             self.cv = KFold(n_splits=n_splits)
-            
+        else:
+            self.cv = cv
         
     def bulid_pipeline(self,):
         # BULID THE TRANSFORMATION PORTION OF THE ML PIPELINE 
@@ -313,10 +400,10 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         parallel = Parallel(n_jobs=self.n_jobs)
         # Perform cross validation on the base estimator (no calibration!) 
         fit_estimators_ = parallel(delayed(
-                _fit)(clone(this_estimator),self.X.iloc[train], self.y[train]) for train, _ in self.cv.split(self.X,self.y))
+                _fit)(clone(this_estimator),self.X[train], self.y[train]) for train, _ in self.cv.split(self.X,self.y))
         
         # The fit estimators were fit on the training folds within clf
-        scores = [self.scorer(model,self.X.iloc[test,:], self.y[test], **self.scorer_kwargs) 
+        scores = [self.scorer(model,self.X[test,:], self.y[test], **self.scorer_kwargs) 
                           for model, (_, test) in zip(fit_estimators_, self.cv.split(self.X, self.y))]
 
         run_time = timer() - start
@@ -335,5 +422,129 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
                 'train_time': run_time, 'status': STATUS_OK}
 
     
+class _CalibratedClassifier:
+    """Probability calibration with isotonic regression or sigmoid.
+
+    It assumes that base_estimator has already been fit, and trains the
+    calibration on the input set of the fit function. Note that this class
+    should not be used as an estimator directly. Use CalibratedClassifierCV
+    with cv="prefit" instead.
+
+    Parameters
+    ----------
+    base_estimator : instance BaseEstimator
+        The classifier whose output decision function needs to be calibrated
+        to offer more accurate predict_proba outputs. No default value since
+        it has to be an already fitted estimator.
+
+    method : 'sigmoid' | 'isotonic'
+        The method to use for calibration. Can be 'sigmoid' which
+        corresponds to Platt's method or 'isotonic' which is a
+        non-parametric approach based on isotonic regression.
+
+    classes : array-like, shape (n_classes,), optional
+            Contains unique classes used to fit the base estimator.
+            if None, then classes is extracted from the given target values
+            in fit().
+
+    See also
+    --------
+    CalibratedClassifierCV
+
+    References
+    ----------
+    .. [1] Obtaining calibrated probability estimates from decision trees
+           and naive Bayesian classifiers, B. Zadrozny & C. Elkan, ICML 2001
+
+    .. [2] Transforming Classifier Scores into Accurate Multiclass
+           Probability Estimates, B. Zadrozny & C. Elkan, (KDD 2002)
+
+    .. [3] Probabilistic Outputs for Support Vector Machines and Comparisons to
+           Regularized Likelihood Methods, J. Platt, (1999)
+
+    .. [4] Predicting Good Probabilities with Supervised Learning,
+           A. Niculescu-Mizil & R. Caruana, ICML 2005
+    """
+    def __init__(self, base_estimator, method='isotonic', classes=None):
+        self.base_estimator = base_estimator
+        self.method = method
+        self.classes = classes
+
+    def _preproc(self, X):
+        n_classes = len(self.classes_)
+        probabilities = self.base_estimator.predict_proba(X)[:,1]
+        idx_pos_class = self.label_encoder_.\
+            transform(self.base_estimator.classes_)
+
+        return probabilities, idx_pos_class
+
+    def fit(self, X, y):
+        """Calibrate the fitted model
+
+        Parameters
+        ----------
+        X : array-lie, shape (n_samples,)
+            Predictions from the base_estimator
+
+        y : array-like, shape (n_samples,)
+            Target values.
+
+        sample_weight : array-like of shape (n_samples,), default=None
+            Sample weights. If None, then samples are equally weighted.
+
+        Returns
+        -------
+        self : object
+            Returns an instance of self.
+        """
+        self.label_encoder_ = LabelEncoder()
+        if self.classes is None:
+            self.label_encoder_.fit(y)
+        else:
+            self.label_encoder_.fit(self.classes)
+
+        self.classes_ = self.label_encoder_.classes_
+        self.calibrator_ = IsotonicRegression(out_of_bounds='clip')
+        self.calibrator_.fit(X, y)
+
+        return self
+
+    def predict_proba(self, X):
+        """Posterior probabilities of classification
+
+        This function returns posterior probabilities of classification
+        according to each class on an array of test vectors X.
+
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            The samples.
+
+        Returns
+        -------
+        C : array, shape (n_samples, n_classes)
+            The predicted probas. Can be exact zeros.
+        """
+        n_classes = len(self.classes_)
+        proba = np.zeros((X.shape[0], n_classes))
+
+        probabilities, idx_pos_class = self._preproc(X)
+
+        proba[:, 1] = self.calibrator_.predict(probabilities)
+
+        # Normalize the probabilities
+        if n_classes == 2:
+            proba[:, 0] = 1. - proba[:, 1]
+        else:
+            proba /= np.sum(proba, axis=1)[:, np.newaxis]
+
+        # XXX : for some reason all probas can be 0
+        proba[np.isnan(proba)] = 1. / n_classes
+
+        # Deal with cases where the predicted probability minimally exceeds 1.0
+        proba[(1.0 < proba) & (proba <= 1.0 + 1e-5)] = 1.0
+
+        return proba
+
 
 
