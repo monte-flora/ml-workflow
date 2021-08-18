@@ -12,16 +12,22 @@ numpy
 pandas
 scikit-learn
 imblearn
+hyperopt
+lightgbm
 ```
 
 ### Using ml_workflow 
 ```python
-# Add the top of the ml_workflow directory to your system path. 
-# Eventually, I will create a setup.py. 
-import sys
-sys.path.append('/path to /ml_workflow')
+import sys, os 
+current_dir = os.getcwd()
+path = os.path.dirname(current_dir)
+sys.path.append(path)
 
-from ml_workflow import CalibratedPipelineHyperOptCV
+from ml_workflow.calibrated_pipeline_hyperopt_cv import CalibratedPipelineHyperOptCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.datasets import make_classification
+import numpy as np
+import pandas as pd 
 ```
 
 This is an example for training a random forest for predicting sub-freezing road surface temperatures. 
@@ -36,6 +42,10 @@ where I want at least 30 dates worth of data per validation fold.
 The optimal hyperparameters uses a loss metric, which is defined by the end-user. In this example, 
 I'm using the normalized critical success index. 
 
+```python
+X,y = make_classification(n_samples=100000, random_state=42, class_sep=0.7)
+X = pd.DataFrame(X)
+```
 
 ```python
 # Create a hyperparameter grid to search over. In this case, 
@@ -48,29 +58,24 @@ param_grid = {  'n_estimators' : [100,150,300,400,500],
              }
 
 # Initialize the estimator that will be using.
-estimator = RandomForestClassifier(n_jobs=8, random_state=30, criterion = 'entropy', class_weight = 'balanced') 
+estimator = RandomForestClassifier(n_jobs=12, random_state=30, criterion = 'entropy',) 
 
-def norm_csi_scorer(model, X, y, **kwargs):
-    known_skew = kwargs.get('known_skew', np.mean(y))
-
-    predictions = model.predict_proba(X)[:,1]
-    score = norm_csi(y, predictions, known_skew=known_skew)
-    return 1.0 - score
-
-dates = train_df['date']
-
-clf = CalibratedPipelineHyperOptCV( estimator = estimator,  
+clf = CalibratedPipelineHyperOptCV( base_estimator = estimator,  
                                     param_grid = param_grid,
                                     imputer=None, 
                                     scaler = None,
                                     resample='under',
-                                    n_jobs=3,
+                                    n_jobs=1,
                                     max_iter=10,
                                     hyperopt='atpe', 
-                                    n_jobs=3,
-                                    scorer=scorer, 
-                                    scorer_kwargs = {'known_skew': known_skew}, 
-                                    cross_val = 'date_based', 
-                                    cross_val_kwargs = {'n_splits' : 5, 'dates' : dates, 'valid_size' : 30},
+                                    scorer_kwargs = {'known_skew': np.mean(y)}, 
                                   )
+clf.fit(X,y)
 ```
+The hyperparameter optimization results are saved in "hyperopt_results.pkl"
+
+```python
+df = pd.read_pickle('hyperopt_results.pkl')
+```
+
+
