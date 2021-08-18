@@ -183,7 +183,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
             self.writer = csv.writer(of_connection)
     
             # Write the headers to the file
-            self.writer.writerow(['loss', 'loss_std', 'params', 'iteration', 'train_time'])
+            self.writer.writerow(['loss', 'loss_variance', 'params', 'iteration', 'train_time'])
             of_connection.close()
     
     def fit(self, X, y):
@@ -322,16 +322,16 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         run_time = timer() - start
         # Loss must be minimized (using NAUPDC as the metric!)
         loss = np.nanmean(scores)
-        loss_std = np.nanstd(scores, ddof=1)
+        loss_variance = np.nanvar(scores, ddof=1)
         
         # Dictionary with information for evaluation
         if self.hyperparam_result_fname is not None:
             # Write to the csv file ('a' means append)
             of_connection = open(self.hyperparam_result_fname, 'a')
             self.writer = csv.writer(of_connection)
-            self.writer.writerow([loss, loss_std, params, self.ITERATION, run_time])
+            self.writer.writerow([loss, loss_variance, params, self.ITERATION, run_time])
 
-        return {'loss': loss, 'loss_std': loss_std, 'iteration': self.ITERATION, 'params' : params,
+        return {'loss': loss, 'loss_variance': loss_variance, 'iteration': self.ITERATION, 'params' : params,
                 'train_time': run_time, 'status': STATUS_OK}
 
     
