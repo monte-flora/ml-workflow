@@ -11,7 +11,7 @@ from scipy.ndimage import gaussian_filter
 
 from sklearn.metrics import brier_score_loss, average_precision_score, roc_auc_score, precision_recall_curve
 
-from mlxtend.evaluate import permutation_test
+#from mlxtend.evaluate import permutation_test
 
 def get_bootstrap_score(ml_all_predictions, 
                         bl_predictions, 

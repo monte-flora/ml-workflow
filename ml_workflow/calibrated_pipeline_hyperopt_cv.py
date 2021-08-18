@@ -13,18 +13,19 @@ from sklearn.utils.validation import check_is_fitted, check_consistent_length
 from sklearn.model_selection import KFold
 from sklearn.utils import check_X_y, check_array, indexable, column_or_1d
 import joblib
+from joblib import delayed, Parallel
 from timeit import default_timer as timer
 import ast
 
 import sys
 sys.path.append('/Users/monte.flora/Desktop/PHD_PLOTS')
 
-from .common.calibration import CalibratedClassifierCV
+from sklearn.calibration import CalibratedClassifierCV
 from .preprocess.preprocess import PreProcessPipeline
 from .io.cross_validation_generator import DateBasedCV
 from .ml_methods import norm_aupdc, norm_csi
-from .my_hyperopt.hyperopt.early_stop import no_progress_loss
-from .my_hyperopt.hyperopt import fmin, tpe, atpe, hp, SparkTrials, STATUS_OK, Trials,space_eval
+from hyperopt.early_stop import no_progress_loss
+from hyperopt import fmin, tpe, atpe, hp, SparkTrials, STATUS_OK, Trials,space_eval
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import RandomOverSampler
 
@@ -44,7 +45,9 @@ def norm_csi_scorer(model, X, y, **kwargs):
     score = norm_csi(y, predictions, known_skew=known_skew)
     return 1.0 - score
 
-
+def _fit(estimator, X, y): 
+    return estimator.fit(X, y)
+          
 class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
                              MetaEstimatorMixin):
     """
@@ -143,7 +146,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
 
     """
     def __init__(self, base_estimator, param_grid, imputer='simple', scaler=None, 
-                resample = None, local_dir=os.getcwd(), n_jobs=1, max_iter=10, 
+                resample = None, local_dir=os.getcwd(), n_jobs=1, max_iter=15, 
                 scorer=norm_csi_scorer, cross_val='kfolds', cross_val_kwargs={'n_splits': 5}, 
                  hyperopt='atpe', scorer_kwargs={},):
         
@@ -180,7 +183,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
             self.writer = csv.writer(of_connection)
     
             # Write the headers to the file
-            self.writer.writerow(['loss', 'params', 'iteration', 'train_time'])
+            self.writer.writerow(['loss', 'loss_std', 'params', 'iteration', 'train_time'])
             of_connection.close()
     
     def fit(self, X, y):
@@ -197,24 +200,20 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.X = X
         self.y = y 
         self.init_cv()
-    
-        self.estimator_ = CalibratedClassifierCV(self.pipe, 
-                                                 cv=self.cv, 
-                                                 method='isotonic', 
-                                                 n_jobs=self.n_jobs)
-
+        
         self._find_best_params()
         
-        # Fit the model with the optimal hyperparamters
-        this_estimator = CalibratedClassifierCV(self.pipe, 
+        this_estimator = CalibratedClassifierCV(base_estimator=self.pipe, 
                                                  cv=self.cv, 
                                                  method='isotonic', 
-                                                 n_jobs=self.n_jobs)
+                                                 n_jobs=self.n_jobs, 
+                                                ensemble=False)
         
-        this_estimator.set_params(**self.best_params)
+        # Fit the model with the optimal hyperparamters
+        best_params = {f'base_estimator__model__{p}' : v for p,v in self.best_params.items()} 
+        this_estimator.set_params(**best_params)
         refit_estimator = this_estimator.fit(X, y)
         self.final_estimator_ = refit_estimator
-        
         
         if self.hyperparam_result_fname is not None:
             self.convert_tuning_results(self.hyperparam_result_fname)
@@ -244,8 +243,8 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         joblib.dump(model_dict, fname)
 
     def _convert_param_grid(self, param_grid):
-        return {f'base_estimator__model__{p}': hp.choice(p, values) for p,values in param_grid.items()}
-
+        return {p: hp.choice(p, values) for p,values in param_grid.items()}
+    
     def _find_best_params(self, ):
         """Find the best hyperparameters using the hyperopt package"""
         # Using early stopping in the error minimization. Need to have 1% drop in loss every 8-10 count (varies)
@@ -260,7 +259,6 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
 
         # Get the values of the optimal parameters
         best_params = space_eval(self.param_grid, best)
-
         self.best_params = best_params
         
         
@@ -294,11 +292,10 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         """ Convert the hyperopt results to pickle file """
         df = pd.read_csv(fname)
         params = ast.literal_eval(df['params'].iloc[0]).keys()
-        params = [p.replace('base_estimator__model__','') for p in params]
         data =  [ast.literal_eval(df['params'].iloc[i]) for i in range(len(df))]
         results = []
         for p in params:
-            df[p] = [data[i][f'base_estimator__model__{p}'] for i in range(len(data))]
+            df[p] = [data[i][p] for i in range(len(data))]
         df = df.drop(columns='params')
 
         df.to_pickle(fname)
@@ -310,28 +307,31 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.ITERATION += 1
         start = timer()
         
-        this_estimator = clone(self.estimator_)       
-        this_estimator.set_params(**params)
+        this_estimator = clone(self.pipe)       
+        this_estimator.named_steps['model'].set_params(**params)
 
-        # Perform n_folds cross validation
-        this_estimator.fit(self.X, self.y)
-
+        parallel = Parallel(n_jobs=self.n_jobs)
+        # Perform cross validation on the base estimator (no calibration!) 
+        fit_estimators_ = parallel(delayed(
+                _fit)(clone(this_estimator),self.X.iloc[train], self.y[train]) for train, _ in self.cv.split(self.X,self.y))
+        
         # The fit estimators were fit on the training folds within clf
         scores = [self.scorer(model,self.X.iloc[test,:], self.y[test], **self.scorer_kwargs) 
-                          for model, (_, test) in zip(this_estimator.fit_estimators_, self.cv.split(self.X, self.y))]
+                          for model, (_, test) in zip(fit_estimators_, self.cv.split(self.X, self.y))]
 
         run_time = timer() - start
         # Loss must be minimized (using NAUPDC as the metric!)
         loss = np.nanmean(scores)
+        loss_std = np.nanstd(scores, ddof=1)
         
         # Dictionary with information for evaluation
         if self.hyperparam_result_fname is not None:
             # Write to the csv file ('a' means append)
             of_connection = open(self.hyperparam_result_fname, 'a')
             self.writer = csv.writer(of_connection)
-            self.writer.writerow([loss, params, self.ITERATION, run_time])
+            self.writer.writerow([loss, loss_std, params, self.ITERATION, run_time])
 
-        return {'loss': loss, 'iteration': self.ITERATION, 'params' : params,
+        return {'loss': loss, 'loss_std': loss_std, 'iteration': self.ITERATION, 'params' : params,
                 'train_time': run_time, 'status': STATUS_OK}
 
     
