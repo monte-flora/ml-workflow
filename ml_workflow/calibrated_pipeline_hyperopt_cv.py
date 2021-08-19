@@ -205,6 +205,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
             y, shape: (n_samples, )
         
         """
+        self.features = list(X.columns)
         X, y = check_X_y(X, y, accept_sparse=['csc', 'csr', 'coo'],
                          force_all_finite=False, allow_nd=True)
         X, y = indexable(X, y)
@@ -317,8 +318,8 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
     def save(self, fname):
         model_dict = {
                     'model' : self,
-                    'features': list(self.X.columns),
-                    'n_features':len(list(self.X.columns)),
+                    'features': self.features,
+                    'n_features':len(self.features),
                     'resample' : self.resample,
                     'scaler' : self.scaler,
                     'n_training_examples' : len(self.X),
