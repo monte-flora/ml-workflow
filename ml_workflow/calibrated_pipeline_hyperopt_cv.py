@@ -327,7 +327,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
                     'skew' : self.known_skew, 
                     }
         
-        joblib.dump(model_dict, fname)
+        joblib.dump(model_dict, fname, compress=3)
 
     def _convert_param_grid(self, param_grid):
         return {p: hp.choice(p, values) for p,values in param_grid.items()}
