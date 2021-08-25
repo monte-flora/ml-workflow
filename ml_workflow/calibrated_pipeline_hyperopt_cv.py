@@ -166,7 +166,6 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.local_dir = local_dir
         # Build components of the pipeline 
         steps = self.bulid_pipeline()
-        self.base_estimator = base_estimator
         steps.append(('model', base_estimator))
         
          # INITIALIZE THE PIPELINE 
@@ -236,10 +235,9 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         # Fit the model with the optimal hyperparamters
         parallel = Parallel(n_jobs=self.n_jobs)
         this_base_estimator = clone(self.pipe) 
-        #best_params = {f'base_estimator__model__{p}' : v for p,v in self.best_params.items()} 
         this_base_estimator.named_steps['model'].set_params(**self.best_params)
         
-        # Perform cross validation on the base estimator/pipeline (no calibration!) 
+        # Perform cross validation to get training/validation data for calibration.
         fit_estimators_ = parallel(delayed(
                 _fit)(clone(this_base_estimator),self.X[train], self.y[train]) for train, _ in self.cv.split(self.X,self.y))
         
@@ -252,21 +250,25 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         cv_predictions =  list(itertools.chain.from_iterable(cv_predictions))
         cv_targets =  list(itertools.chain.from_iterable(cv_targets))
 
-        # Re-fit base_estimator/pipeline on the whole dataset
+        # Clone the original pipeline
         this_estimator = clone(self.pipe)
+        # Set the base estimator with the best params
+        this_estimator.named_steps['model'].set_params(**self.best_params)
+        # Re-fit base_estimator/pipeline on the whole dataset
         refit_estimator = this_estimator.fit(X,y)
 
+        self.base_estimator = refit_estimator 
+        # Fit the isotonic regression model (for calibration).
         calibrated_classifier = _CalibratedClassifier(
                     refit_estimator, method=self.cal_method,
                     classes=self.classes_)
-
-        # Fit the isotonic regression model. 
         calibrated_classifier.fit(cv_predictions, cv_targets)
         self.calibrated_classifiers_.append(calibrated_classifier)
 
         if self.hyperparam_result_fname is not None:
             self.convert_tuning_results(self.hyperparam_result_fname)
         
+        # Since we save all attributes, writer needs to be reset 
         self.writer = 0
         
         return self
@@ -347,7 +349,6 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         # Get the values of the optimal parameters
         best_params = space_eval(self.param_grid, best)
         self.best_params = best_params
-        
         
     def init_cv(self,):
         """Initialize the cross-validation generator"""
