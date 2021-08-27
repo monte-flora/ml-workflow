@@ -332,8 +332,15 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         joblib.dump(model_dict, fname, compress=3)
 
     def _convert_param_grid(self, param_grid):
-        return {p: hp.choice(p, values) for p,values in param_grid.items()}
-    
+        """
+        Converts a parameter grid to a hyperopt-friendly format if provide a list.
+        """
+        for p, values in param_grid.items():
+            if isinstance(values, list): 
+                return {p: hp.choice(p, values) for p,values in param_grid.items()}
+            else: 
+                return param_grid
+            
     def _find_best_params(self, ):
         """Find the best hyperparameters using the hyperopt package"""
         # Using early stopping in the error minimization. Need to have 1% drop in loss every 8-10 count (varies)
