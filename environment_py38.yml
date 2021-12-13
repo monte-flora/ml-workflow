@@ -1,0 +1,15 @@
+name: base
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8.10
+  - pip=21.1
+  - scikit-image=0.18.2
+  - xarray=0.18.2  
+  - pandas=1.3.0
+  - pip:
+    - sklearn
+    - imblearn
+    - hyperopt
+    - lightgbm
