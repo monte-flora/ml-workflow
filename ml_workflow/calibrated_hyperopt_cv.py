@@ -139,17 +139,9 @@ class CalibratedHyperOptCV(BaseEstimator, ClassifierMixin,
                  hyperopt='atpe', scorer_kwargs={},):
         
         self.cal_method = cal_method
-        self.imputer = imputer
-        self.scaler = scaler
-        self.resample = resample
         self.hyperopt = hyperopt
         self.local_dir = local_dir
-        # Build components of the pipeline 
-        #steps = self.bulid_pipeline()
-        #steps.append(('model', base_estimator))
-        
-         # INITIALIZE THE PIPELINE 
-        self.pipe = estimator #Pipeline(steps)
+        self.pipe = estimator 
         
         self.algo=atpe.suggest if hyperopt == 'atpe' else tpe.suggest
         
@@ -157,7 +149,10 @@ class CalibratedHyperOptCV(BaseEstimator, ClassifierMixin,
         self.cv_kwargs = cv_kwargs
         self.scorer_kwargs = scorer_kwargs
         self.n_jobs = n_jobs
-        self.param_grid = self._convert_param_grid(param_grid)
+        if param_grid is not None:
+            self.param_grid = self._convert_param_grid(param_grid)
+        else:
+            self.param_grid = None
         self.scorer = scorer
         self.MAX_EVALS = 100
         self.max_iter = max_iter

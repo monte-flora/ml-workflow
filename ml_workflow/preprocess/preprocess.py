@@ -9,6 +9,7 @@ from sklearn.pipeline import FeatureUnion
 from sklearn.linear_model import LogisticRegression
 from sklearn.feature_selection import SelectFromModel
 from sklearn.compose import ColumnTransformer
+from imblearn.pipeline import Pipeline
 
 import marshal
 from types import FunctionType
@@ -30,7 +31,7 @@ class PreProcessPipeline:
         # Pre-processing order : Imputer, Normalize, PCA, Resample, 
         method_args = [self.imputer_arg, self.scaler_arg, self.pca_arg,  
                        self.resample_arg, ]        
-        method_order = ['imputer', 'scaler', 'pca_transform', 'resample', ] 
+        method_order = ['imputer', 'scaler', 'pca_transform']
 
         numeric_transformers = [ ]
         for arg, method in zip(method_args, method_order):
@@ -43,14 +44,21 @@ class PreProcessPipeline:
         
             transformer = ColumnTransformer(
                 transformers=[
-                    ("num", numeric_transformers, self._numeric_features),
+                    ("num", Pipeline(numeric_transformers), self._numeric_features),
                     ("cat", categorical_transformer, self._categorical_features),
                     ]
                 )
         
-            return [("preprocessor", transformer)]
-
-        return numeric_transformers
+            steps = [("preprocessor", transformer)]
+        else:
+            steps = numeric_transforms
+        
+        
+        if self.resample_arg is not None:
+            steps.append(self.resample(self.resample_arg))
+        
+          
+        return steps
 
     def resample(self, method=None):
         """
