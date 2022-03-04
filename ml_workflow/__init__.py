@@ -1,4 +1,5 @@
-from .calibrated_pipeline_hyperopt_cv import CalibratedPipelineHyperOptCV
+from .calibrated_hyperopt_cv import CalibratedHyperOptCV
+from .preprocess.preprocess import PreProcessPipeline
 
 import os
 __key__ = 'PACKAGE_VERSION'

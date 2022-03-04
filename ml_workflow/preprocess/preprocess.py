@@ -1,13 +1,14 @@
 import numpy as np 
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import RandomOverSampler
-from sklearn.preprocessing import StandardScaler, RobustScaler, FunctionTransformer 
+from sklearn.preprocessing import StandardScaler, RobustScaler, FunctionTransformer, MinMaxScaler, OneHotEncoder 
 from sklearn.decomposition import PCA
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import  SimpleImputer, IterativeImputer
 from sklearn.pipeline import FeatureUnion
 from sklearn.linear_model import LogisticRegression
 from sklearn.feature_selection import SelectFromModel
+from sklearn.compose import ColumnTransformer
 
 import marshal
 from types import FunctionType
@@ -15,28 +16,41 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 class PreProcessPipeline:
     
-    def __init__(self, imputer='simple', scaler='standard',
-            pca=None, resample='under', ): 
+    def __init__(self, imputer='simple', scaler='minmax',
+            pca=None, resample='under', numeric_features=None, categorical_features=None ): 
 
         self.imputer_arg = imputer
         self.scaler_arg = scaler
         self.pca_arg = pca
         self.resample_arg= resample
+        self._categorical_features=categorical_features
+        self._numeric_features=numeric_features
 
     def get_steps(self):
         # Pre-processing order : Imputer, Normalize, PCA, Resample, 
         method_args = [self.imputer_arg, self.scaler_arg, self.pca_arg,  
-                       self.resample_arg, ]
-        
+                       self.resample_arg, ]        
         method_order = ['imputer', 'scaler', 'pca_transform', 'resample', ] 
 
-        steps = [ ]
+        numeric_transformers = [ ]
         for arg, method in zip(method_args, method_order):
             if arg is not None:
                 func = getattr(self, method)
-                steps.append(func(arg))
+                numeric_transformers.append(func(arg))
 
-        return steps 
+        if self._categorical_features is not None:
+            categorical_transformer = OneHotEncoder(handle_unknown="ignore")
+        
+            transformer = ColumnTransformer(
+                transformers=[
+                    ("num", numeric_transformers, self._numeric_features),
+                    ("cat", categorical_transformer, self._categorical_features),
+                    ]
+                )
+        
+            return [("preprocessor", transformer)]
+
+        return numeric_transformers
 
     def resample(self, method=None):
         """
@@ -80,7 +94,9 @@ class PreProcessPipeline:
             scaler = StandardScaler()
         elif method == 'robust':
             scaler = RobustScaler()
-          
+        elif method == 'minmax':
+            scaler = MinMaxScaler()
+        
         return ('scaler', scaler) 
 
     
