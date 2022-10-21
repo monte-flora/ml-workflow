@@ -13,6 +13,90 @@ from sklearn.metrics import brier_score_loss, average_precision_score, roc_auc_s
 
 #from mlxtend.evaluate import permutation_test
 
+def get_bootstrap_score(y,
+                        preds,
+                        n_bootstrap,
+                        known_skew,
+                        bl_predictions=None,
+                        ml_reduced_predictions=None,
+                        forecast_time_indices=None, metric_mapper=None):
+    """
+    Bootstrap compute various performance metrics. Bootstrapping design is built to limit the 
+    impact of autocorrelated data from artifically shrinking the uncertainty. 
+    """
+    base_random_state = np.random.RandomState(22)
+    random_num_set = base_random_state.choice(10000, size=n_bootstrap, replace=False)
+
+    even_or_odd = base_random_state.choice([2, 3], size=n_bootstrap)
+
+    if metric_mapper is None:
+        metric_mapper = OrderedDict({'naupdc':norm_aupdc,
+                             'auc': roc_auc_score,
+                             'bss':brier_skill_score,
+                             'reliability':bss_reliability,
+                             'ncsi': norm_csi, })
+
+    ml_all_results = {key : (['n_boot'],
+                         np.zeros((n_bootstrap))) for key in metric_mapper.keys()}
+    if ml_reduced_predictions is not None:
+        ml_reduced_results = {key : (['n_boot'],
+                         np.zeros((n_bootstrap))) for key in metric_mapper.keys()}
+    bl_results = {key : (['n_boot'],
+                         np.zeros((n_bootstrap))) for key in metric_mapper.keys()}
+
+
+    for n in range(n_bootstrap):
+        # For each bootstrap resample, only sample from some subset of time steps 
+        # to reduce autocorrelation effects. Not perfect, but will improve variance assessment. 
+        new_random_state = np.random.RandomState(random_num_set[n])
+        these_idxs = new_random_state.choice(len(y), size= len(y))
+        if forecast_time_indices is not None:
+            # val with either be a 2, 3, or 4 and then only resample from those samples. 
+            val = even_or_odd[n]
+            # Find those forecast time indices that are even or odd 
+            where_is_fti = np.where(forecast_time_indices%val==0)[0]
+            # Find the "where_is_item" has the same indices as "where_is_fti"
+            idxs_subset = list(set(these_idxs).intersection(where_is_fti))
+            # Resample idxs_subset for each iteration 
+            these_idxs = new_random_state.choice(idxs_subset, size=len(idxs_subset),)
+
+        if len(these_idxs) > 0 and np.mean(y[these_idxs])>0.0:
+            for metric in metric_mapper.keys():
+                if metric =='naupdc' or metric == 'ncsi':
+                    ml_all_results[metric][1][n] = metric_mapper[metric](y[these_idxs],
+                                                                preds[these_idxs], known_skew=known_skew)
+                    if ml_reduced_predictions is not None:
+                        ml_reduced_results[metric][1][n] = metric_mapper[metric](y[these_idxs],
+                                                                ml_reduced_predictions[these_idxs],
+                                                                             known_skew=known_skew)
+                    if bl_predictions is not None:
+                        bl_results[metric][1][n] = metric_mapper[metric](y[these_idxs],
+                                                                bl_predictions[these_idxs], known_skew=known_skew)
+                else:
+                    ml_all_results[metric][1][n] = metric_mapper[metric](y[these_idxs], preds[these_idxs])
+
+                    if ml_reduced_predictions is not None:
+                        ml_reduced_results[metric][1][n] = metric_mapper[metric](y[these_idxs],
+                                                                ml_reduced_predictions[these_idxs], )
+                    if bl_predictions is not None:
+                        bl_results[metric][1][n] = metric_mapper[metric](y[these_idxs], bl_predictions[these_idxs])
+
+    ml_all_ds = xr.Dataset(ml_all_results)
+    if ml_reduced_predictions is not None:
+        ml_reduced_ds = xr.Dataset(ml_reduced_results)
+
+    if (ml_reduced_predictions is not None) and (bl_predictions is not None):
+        return ml_all_ds, ml_reduced_ds, bl_ds
+
+    elif bl_predictions is not None:
+        bl_ds = xr.Dataset(bl_results)
+        return ml_all_ds, bl_ds
+
+    else:
+        return ml_all_ds
+
+
+'''
 def get_bootstrap_score(ml_all_predictions, 
                         bl_predictions, 
                         n_bootstrap,
@@ -88,7 +172,7 @@ def get_bootstrap_score(ml_all_predictions,
         return ml_all_ds, ml_reduced_ds, bl_ds
     else:
         return ml_all_ds,  bl_ds
-
+'''
 
 def stat_testing(new_score, baseline_score):
     """
