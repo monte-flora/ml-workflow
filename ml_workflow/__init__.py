@@ -1,5 +1,7 @@
-from .calibrated_hyperopt_cv import CalibratedHyperOptCV
+from .hyperparameter_optimizer import HyperOptCV
 from .preprocess.preprocess import PreProcessPipeline
+from .tuned_estimator import TunedEstimator
+
 
 import os
 __key__ = 'PACKAGE_VERSION'

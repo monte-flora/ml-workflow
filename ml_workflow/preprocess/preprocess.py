@@ -27,6 +27,14 @@ class PreProcessPipeline:
         self._categorical_features=categorical_features
         self._numeric_features=numeric_features
 
+    def get_pipeline(self, estimator):
+        steps = self.get_steps()
+        
+        steps.append(('model', estimator))
+        
+        return Pipeline(steps=steps) 
+    
+        
     def get_steps(self):
         # Pre-processing order : Imputer, Normalize, PCA, Resample, 
         method_args = [self.imputer_arg, self.scaler_arg, self.pca_arg,  
@@ -51,7 +59,7 @@ class PreProcessPipeline:
         
             steps = [("preprocessor", transformer)]
         else:
-            steps = numeric_transforms
+            steps = numeric_transformers
         
         
         if self.resample_arg is not None:
@@ -80,7 +88,7 @@ class PreProcessPipeline:
             imputer = SimpleImputer(
                 missing_values=np.nan, strategy="median"
             )
-        else:
+        elif method == 'iterative':
             imputer = IterativeImputer(random_state=0)
 
         return ('imputer', imputer)

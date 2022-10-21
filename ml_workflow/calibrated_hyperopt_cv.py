@@ -142,6 +142,7 @@ class CalibratedHyperOptCV(BaseEstimator, ClassifierMixin,
         self.hyperopt = hyperopt
         self.local_dir = local_dir
         self.pipe = estimator 
+        self.estimator = estimator
         
         self.algo=atpe.suggest if hyperopt == 'atpe' else tpe.suggest
         
@@ -209,8 +210,7 @@ class CalibratedHyperOptCV(BaseEstimator, ClassifierMixin,
             self._find_best_params()
         else:
             self.best_params = params 
-            
-            
+
         # Fit the model with the optimal hyperparamters
         parallel = Parallel(n_jobs=self.n_jobs)
         this_base_estimator = clone(self.pipe) 
@@ -244,9 +244,12 @@ class CalibratedHyperOptCV(BaseEstimator, ClassifierMixin,
         calibrated_classifier.fit(cv_predictions, cv_targets)
         self.calibrated_classifiers_.append(calibrated_classifier)
 
-        if self.hyperparam_result_fname is not None:
-            self.convert_tuning_results(self.hyperparam_result_fname)
-        
+        try:
+            if self.hyperparam_result_fname is not None:
+                self.convert_tuning_results(self.hyperparam_result_fname)
+        except IndexError:
+            print('Issuing with convert the hyperparam output file!') 
+    
         # Since we save all attributes, writer needs to be reset 
         self.writer = 0
         
@@ -301,8 +304,6 @@ class CalibratedHyperOptCV(BaseEstimator, ClassifierMixin,
                     'model' : self,
                     'features': self.features,
                     'n_features':len(self.features),
-                    'resample' : self.resample,
-                    'scaler' : self.scaler,
                     'n_training_examples' : len(self.X),
                     'hyperparameters' : self.best_params, 
                     'skew' : self.known_skew, 
@@ -320,22 +321,21 @@ class CalibratedHyperOptCV(BaseEstimator, ClassifierMixin,
             else: 
                 return param_grid
             
-    def _find_best_params(self, ):
+    def _find_best_params(self,):
         """Find the best hyperparameters using the hyperopt package"""
         # Using early stopping in the error minimization. Need to have 1% drop in loss every 8-10 count (varies)
         best = fmin(self.objective,
-            self.param_grid,
-            algo=self.algo,
-            max_evals=self.MAX_EVALS,
-            trials=self.trials,
-            early_stop_fn=no_progress_loss(iteration_stop_count=self.max_iter,
-                percent_increase=1.0),
-            )
+                self.param_grid,
+                algo=self.algo,
+                max_evals=self.MAX_EVALS,
+                trials=self.trials,
+                early_stop_fn=no_progress_loss(iteration_stop_count=self.max_iter,
+                    percent_increase=1.0),
+                )
 
         # Get the values of the optimal parameters
-        best_params = space_eval(self.param_grid, best)
-        self.best_params = best_params
-        
+        self.best_params = space_eval(self.param_grid, best)
+
     def init_cv(self,):
         """Initialize the cross-validation generator"""
         # INITIALIZE MY CUSTOM CV SPLIT GENERATOR
