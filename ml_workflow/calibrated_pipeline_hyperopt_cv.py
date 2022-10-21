@@ -1,6 +1,9 @@
 ##############################################
 # TrainModels 
 ##############################################
+from sklearnex import patch_sklearn
+patch_sklearn()
+
 import csv
 import pandas as pd
 import numpy as np
@@ -194,7 +197,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
             self.writer.writerow(['loss', 'loss_variance', 'params', 'iteration', 'train_time'])
             of_connection.close()
     
-    def fit(self, X, y):
+    def fit(self, X, y, params=None):
         """
         Fit the estimator 
         
@@ -229,8 +232,11 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.calibrated_classifiers_ = []
         cv = check_cv(self.cv, y, classifier=True)
         
-        # Perform cross validation on the base estimator (no calibration!) 
-        self._find_best_params()
+        # Perform cross validation on the base estimator (no calibration!)
+        if params is None:
+            self._find_best_params()
+        else:
+            self.best_params = params
 
         # Fit the model with the optimal hyperparamters
         parallel = Parallel(n_jobs=self.n_jobs)
@@ -266,7 +272,10 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.calibrated_classifiers_.append(calibrated_classifier)
 
         if self.hyperparam_result_fname is not None:
-            self.convert_tuning_results(self.hyperparam_result_fname)
+            try:
+                self.convert_tuning_results(self.hyperparam_result_fname)
+            except:
+                print('Unable to convert hyperparam results!')
         
         # Since we save all attributes, writer needs to be reset 
         self.writer = 0
