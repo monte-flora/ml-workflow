@@ -2,6 +2,9 @@
 # a pre-processing pipeline, perform hyperparamter optimization, 
 # and calibration of the final model based on the user inputs. 
 
+from sklearnex import patch_sklearn
+patch_sklearn()
+
 import numpy as np
 import pandas as pd
 import joblib
