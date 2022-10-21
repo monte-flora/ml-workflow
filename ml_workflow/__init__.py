@@ -1,3 +1,4 @@
+from .calibrated_pipeline_hyperopt_cv import CalibratedPipelineHyperOptCV
 from .hyperparameter_optimizer import HyperOptCV
 from .preprocess.preprocess import PreProcessPipeline
 from .tuned_estimator import TunedEstimator
