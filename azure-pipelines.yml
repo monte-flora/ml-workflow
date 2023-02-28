@@ -42,7 +42,7 @@ stages:
             # workaround based on recent failures
             rm /usr/share/miniconda/pkgs/cache/*.json    
             echo "Build environment from file: $(env_file)"
-            mamba env create --force --file $(env_file)
+            mamba env update -n base --file $(env_file)
           displayName: Create mamba environment
       
         - bash: |
