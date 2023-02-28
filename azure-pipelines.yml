@@ -15,9 +15,9 @@ stages:
   displayName: Build Package
   jobs:
       - job:
-        displayName: ubuntu-18.04
+        displayName: ubuntu-latest
         pool:
-          vmImage: 'ubuntu-18.04'
+          vmImage: 'ubuntu-latest'
         strategy:
           matrix:
             # Python36:
