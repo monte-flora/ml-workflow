@@ -32,7 +32,7 @@ setup(
         'Programming Language :: Python :: 3'
     ],
     install_requires = [
-        'sklearn',
+        'scikit-learn==1.0.2',
         'scikit-image>=0.18.1',
         'xarray',
         'imblearn',
