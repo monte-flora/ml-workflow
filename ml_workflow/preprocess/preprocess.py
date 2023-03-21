@@ -1,7 +1,7 @@
 import numpy as np 
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import RandomOverSampler
-from sklearn.preprocessing import StandardScaler, RobustScaler, FunctionTransformer, MinMaxScaler, OneHotEncoder 
+from sklearn.preprocessing import StandardScaler, RobustScaler, FunctionTransformer, MinMaxScaler, OrdinalEncoder 
 from sklearn.decomposition import PCA
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import  SimpleImputer, IterativeImputer
@@ -10,10 +10,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.feature_selection import SelectFromModel
 from sklearn.compose import ColumnTransformer
 from imblearn.pipeline import Pipeline
+from joblib import Memory
 
 import marshal
 from types import FunctionType
 from sklearn.base import BaseEstimator, TransformerMixin
+from tempfile import mkdtemp
 
 class PreProcessPipeline:
     
@@ -27,12 +29,18 @@ class PreProcessPipeline:
         self._categorical_features=categorical_features
         self._numeric_features=numeric_features
 
-    def get_pipeline(self, estimator):
+    def get_pipeline(self, estimator, return_cache=False):
         steps = self.get_steps()
         
         steps.append(('model', estimator))
         
-        return Pipeline(steps=steps) 
+        if return_cache:
+            # Create a temporary folder to store the transformers of the pipeline
+            #cachedir = mkdtemp()
+            #memory = Memory(cachedir=cachedir, verbose=10)
+            return Pipeline(steps=steps)# memory=memory), cachedir 
+        else:
+            return Pipeline(steps=steps)
     
         
     def get_steps(self):
@@ -48,12 +56,14 @@ class PreProcessPipeline:
                 numeric_transformers.append(func(arg))
 
         if self._categorical_features is not None:
-            categorical_transformer = OneHotEncoder(handle_unknown="ignore")
-        
+            encoder = OrdinalEncoder(handle_unknown="use_encoded_value", 
+                                    unknown_value=np.nan)
+            categorical_transformers = [('encoder', encoder)] + numeric_transformers
+                     
             transformer = ColumnTransformer(
                 transformers=[
                     ("num", Pipeline(numeric_transformers), self._numeric_features),
-                    ("cat", categorical_transformer, self._categorical_features),
+                    ("cat", Pipeline(categorical_transformers), self._categorical_features),
                     ]
                 )
         
@@ -89,7 +99,13 @@ class PreProcessPipeline:
                 missing_values=np.nan, strategy="median"
             )
         elif method == 'iterative':
-            imputer = IterativeImputer(random_state=0)
+            imputer = IterativeImputer(random_state=0, missing_values=np.nan, 
+                          n_nearest_features=10, initial_strategy='mean', 
+                          skip_complete=True, min_value = -0.0001, 
+                           tol = 0.01,
+                          max_value = 10000,
+                           max_iter=5, 
+                          )
 
         return ('imputer', imputer)
 

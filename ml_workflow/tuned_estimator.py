@@ -8,9 +8,9 @@ patch_sklearn()
 import numpy as np
 import pandas as pd
 import joblib
+from shutil import rmtree
 
 # sklearn 
-from sklearn.model_selection import GroupKFold, KFold
 from sklearn.base import (BaseEstimator, ClassifierMixin, RegressorMixin, clone,
                    MetaEstimatorMixin)
 from sklearn.utils.validation import check_is_fitted, check_consistent_length
@@ -97,28 +97,15 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
         
         self.estimator = estimator 
         
-    def get_cv(self, X, y, groups=None):
-        
-        # Initialize the cross-validation. 
-        if groups is not None:
-            group_kfold = GroupKFold(n_splits=5) 
-            cv = group_kfold.split(X, y, groups)
-        else:
-            kfold = KFold(n_splits=5) 
-            cv = kfold.split(X, y)
-        
-        return cv 
-    
-    def get_pipeline(self, estimator):
+    def get_pipeline(self, estimator, return_cache=False):
         if self.pipeline_kwargs:
-            return PreProcessPipeline(**self.pipeline_kwargs).get_pipeline(estimator)
+            return PreProcessPipeline(**self.pipeline_kwargs).get_pipeline(estimator, return_cache)
+
         else:
             return estimator
         
     def _fit_hyperopt(self, X, y, groups=None):
-        
-        cv = self.get_cv(X, y, groups)
-        pipeline = self.get_pipeline(self.estimator)
+        pipeline = self.get_pipeline(self.estimator, return_cache=True)
 
         # Rather than introducing two imputers, we can simply replace 
         # inf vals with nans. 
@@ -128,10 +115,19 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
         
         hopt = HyperOptCV(**self.hyperopt_kwargs) 
         
-        hopt.fit(X,y)
+        hopt.fit(X,y, groups)
+        
+        # delete the temporary cache before exiting
+        #rmtree(cachedir)
     
+        # Save the hyperopt results.
+        output_fname = self.hyperopt_kwargs.get('output_fname', None)
+        
+        if output_fname is not None:
+            df = pd.DataFrame(hopt.dataframe_)
+            df.to_feather(self.hyperopt_kwargs['output_fname'])
+        
         return hopt.best_params_
-    
     
     def fit(self, X, y, groups=None):
         """
@@ -146,14 +142,14 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X)
         
-        cv = self.get_cv(X, y, groups)
         if self.hyperopt_kwargs:
             best_params = self._fit_hyperopt(X,y,groups)
             self.best_params_ = best_params
-            pipeline = self.get_pipeline(self.estimator.set_params(**best_params))
+            pipeline = self.get_pipeline(self.estimator.set_params(**best_params), return_cache=False)
+            
         else:
             self.best_params_ = 'None'
-            pipeline = self.get_pipeline(self.estimator)
+            pipeline = self.get_pipeline(self.estimator, return_cache=False)
         
         # Rather than introducing two imputers, we can simply replace 
         # inf vals with nans. 
@@ -161,7 +157,6 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
 
         self.X_ = X 
         self.y_ = y 
-        
         
         # After hyperopt tuning, perform the calibration. 
         if self.calibration_cv_kwargs:
@@ -174,7 +169,6 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
         else:
             self.model_ = pipeline
             
-    
         self.model_.fit(X,y)
         
         # To save the model. 

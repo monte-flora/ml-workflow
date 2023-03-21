@@ -63,12 +63,21 @@ class WeightedAverageClassifier(BaseEstimator, ClassifierMixin,
     X_ : The training dataframe inputs 
     y_ : The target values 
     """
-    def __init__(self, estimators, cv, scorer=average_precision_score): 
+    def __init__(self, estimators, cv=None, scorer=average_precision_score, weights=None): 
         
         self.estimators = estimators 
         self.n_estimators = len(estimators)
         self.scorer = scorer 
         self.cv = cv
+        if weights is None:
+            n_est = len(estimators)
+            weights = [1]*n_est
+            weights /= n_est
+            
+        # this is only here for printing purposes
+        self.weights = weights 
+        
+        self.weights_ = weights
 
         
     def get_score(self, X, y, groups, est):
@@ -94,23 +103,28 @@ class WeightedAverageClassifier(BaseEstimator, ClassifierMixin,
             y, shape: (n_samples, )
         
         """
-        if not isinstance(X, pd.DataFrame):
-            X = pd.DataFrame(X)
+        #if not isinstance(X, pd.DataFrame):
+        #    X = pd.DataFrame(X)
             
-        self.features = X.columns
+        #self.features = X.columns
         
         # Rather than introducing two imputers, we can simply replace 
         # inf vals with nans. 
-        X.replace([np.inf, -np.inf], np.nan, inplace=True)
+        #X.replace([np.inf, -np.inf], np.nan, inplace=True)
 
-        self.X_ = X 
-        self.y_ = y 
+        #self.X_ = X 
+        #self.y_ = y 
         
-        scores = [self.get_score(X, y, groups, est) for est in self.estimators]
-        # Compute the total score and then base the 
-        # the weights as the ratios of the total score. 
-        total_score = np.sum(scores)
-        self.weights_ = scores / total_score
+        if self.weights_ is None: 
+        
+            # For the moment, this just computes a simple average. 
+            self.scores = [self.get_score(X, y, groups, est) for est in self.estimators]
+            # Compute the total score and then base the 
+            # the weights as the ratios of the total score. 
+            self.total_score = np.sum(self.scores)
+            
+            self.weights_ = scores/total_score
+       
         
         return self
         
@@ -152,4 +166,4 @@ class WeightedAverageClassifier(BaseEstimator, ClassifierMixin,
         data = {'model' : self,
                 'features' : self.features,
                }
-        joblib.dump(data, fname, compress=3)
+        joblib.dump(data, fname, compress=5)

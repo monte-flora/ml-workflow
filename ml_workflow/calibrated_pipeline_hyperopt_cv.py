@@ -169,6 +169,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.local_dir = local_dir
         # Build components of the pipeline 
         steps = self.bulid_pipeline()
+        self.base_estimator = base_estimator 
         steps.append(('model', base_estimator))
         
          # INITIALIZE THE PIPELINE 
@@ -187,15 +188,17 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
         self.trials = Trials()
         self.ITERATION = 0
 
-        self.hyperparam_result_fname = join(local_dir, 'hyperopt_results.pkl')
+        self.hyperparam_result_fname = None #join(local_dir, 'hyperopt_results.pkl')
         if self.hyperparam_result_fname is not None:
             # File to save first results
+
             of_connection = open(self.hyperparam_result_fname, 'w')
             self.writer = csv.writer(of_connection)
     
             # Write the headers to the file
             self.writer.writerow(['loss', 'loss_variance', 'params', 'iteration', 'train_time'])
             of_connection.close()
+
     
     def fit(self, X, y, params=None):
         """
@@ -379,8 +382,7 @@ class CalibratedPipelineHyperOptCV(BaseEstimator, ClassifierMixin,
                 self.cv = DateBasedCV(n_splits=n_splits, dates=dates, y=self.y, valid_size=valid_size)
         elif self.cv =='kfolds':
             self.cv = KFold(n_splits=n_splits)
-        else:
-            self.cv = cv
+        
         
     def bulid_pipeline(self,):
         # BULID THE TRANSFORMATION PORTION OF THE ML PIPELINE 
