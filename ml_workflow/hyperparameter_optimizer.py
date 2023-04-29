@@ -176,7 +176,13 @@ class HyperOptCV:
         Convert the output from objective to a new row in the dataframe. 
         """
         for param in params.keys():
-            data[param] = params[param]
+            if isinstance(params[param], dict):
+                p = params[param]
+                dict_list = [':'.join((str(k), str(i))) for k,i in p.items()]
+                new_p = ','.join(dict_list)
+                data[param] = new_p
+            else:
+                data[param] = params[param]
             
         self.dataframe_.append(data)
         

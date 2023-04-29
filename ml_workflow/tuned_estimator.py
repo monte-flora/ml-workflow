@@ -125,7 +125,10 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
         
         if output_fname is not None:
             df = pd.DataFrame(hopt.dataframe_)
-            df.to_feather(self.hyperopt_kwargs['output_fname'])
+            try:
+                df.to_json(self.hyperopt_kwargs['output_fname'])
+            except:
+                print('Unable to save hyperopt results!') 
         
         return hopt.best_params_
     
