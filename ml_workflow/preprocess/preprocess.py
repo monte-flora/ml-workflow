@@ -45,8 +45,7 @@ class PreProcessPipeline:
         
     def get_steps(self):
         # Pre-processing order : Imputer, Normalize, PCA, Resample, 
-        method_args = [self.imputer_arg, self.scaler_arg, self.pca_arg,  
-                       self.resample_arg, ]        
+        method_args = [self.imputer_arg, self.scaler_arg, self.pca_arg,]        
         method_order = ['imputer', 'scaler', 'pca_transform']
 
         numeric_transformers = [ ]
@@ -167,7 +166,7 @@ class CorrelationFilter:
 
         return np.nanmean(cc_vals)
 
-    def correlation_filtering(self, df, cc_val):
+    def filter_dataframe(self, X, cc_val):
         """
         filter a dataframe by correlation
         2. Determine the pair of predictors with the highest correlation 
@@ -178,8 +177,8 @@ class CorrelationFilter:
 
         4. Remove the predictors with the highest average correlation. 
         """
-        corr_matrix = df.corr().abs()
-        predictor_names = list(df.columns)
+        corr_matrix = X.corr().abs()
+        predictor_names = list(X.columns)
 
         correlated_pairs = {}
         columns_to_drop = []
@@ -218,7 +217,7 @@ class CorrelationFilter:
             # in the dataset (excluding predictor A and predictor B)
             avg_corr_with_A = self.avg_corr_with_other_predictors(all_predictor_pairs,
                                                              predictors_paired_with_A)
-
+            
             # Compute the average correlation of predictor B with every predictor 
             # in the dataset. 
             avg_corr_with_B = self.avg_corr_with_other_predictors(all_predictor_pairs,
@@ -237,7 +236,9 @@ class CorrelationFilter:
                     all_predictor_pairs[pair],
                 )
 
-        return columns_to_drop, correlated_pairs
+        X_subset = X.drop(columns_to_drop, axis=1)       
+                
+        return X_subset, columns_to_drop, correlated_pairs
 
     def filter_df_by_correlation(self, inp_data, target_var, cc_val=0.8):
         """
