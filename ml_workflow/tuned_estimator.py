@@ -104,7 +104,7 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
         else:
             return estimator
         
-    def _fit_hyperopt(self, X, y, groups=None):
+    def _fit_hyperopt(self, X, y, groups=None, sample_weight=None):
         pipeline = self.get_pipeline(self.estimator, return_cache=True)
 
         # Rather than introducing two imputers, we can simply replace 
@@ -115,7 +115,7 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
         
         hopt = HyperOptCV(**self.hyperopt_kwargs) 
         
-        hopt.fit(X,y, groups)
+        hopt.fit(X,y,groups,sample_weight)
         
         # delete the temporary cache before exiting
         #rmtree(cachedir)
@@ -128,11 +128,11 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
             try:
                 df.to_json(self.hyperopt_kwargs['output_fname'])
             except:
-                print('Unable to save hyperopt results!') 
+                print(f"Unable to save hyperopt results @ {self.hyperopt_kwargs['output_fname']}!") 
         
         return hopt.best_params_
     
-    def fit(self, X, y, groups=None):
+    def fit(self, X, y, groups=None, sample_weight=None):
         """
         Fit the estimator 
         
@@ -146,7 +146,7 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
             X = pd.DataFrame(X)
         
         if self.hyperopt_kwargs:
-            best_params = self._fit_hyperopt(X,y,groups)
+            best_params = self._fit_hyperopt(X,y,groups,sample_weight)
             self.best_params_ = best_params
             pipeline = self.get_pipeline(self.estimator.set_params(**best_params), return_cache=False)
             
@@ -167,12 +167,13 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
                 self.calibration_cv_kwargs['cv'] = cv
             
             self.calibration_cv_kwargs['base_estimator'] = pipeline
-            
             self.model_ = CalibratedClassifierCV(**self.calibration_cv_kwargs)
+            self.model_.fit(X,y)
+            
         else:
             self.model_ = pipeline
-            
-        self.model_.fit(X,y)
+            fit_params = {'model__sample_weight' : sample_weight}       
+            self.model_.fit(X,y, **fit_params)
         
         # To save the model. 
         if self.calibration_cv_kwargs:
@@ -211,7 +212,17 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
         """
         return self.model_.predict(X) 
         
-    def save(self, fname): 
+    def save(self, fname, keras=False): 
+        
+        if keras:
+            # Save the Keras model first:
+            keras_fname = fname.replace('.joblib', '_keras_model.h5')
+            print(f'{keras_fname=}')
+            self.model_.named_steps['model'].model.save(keras_fname)
+
+            # This hack allows us to save the sklearn pipeline with a keras model
+            self.model_.named_steps['model'] = None
+
         data = {'model' : self.model_, 
                 'X' : self.X_, 
                 'y' : self.y_,

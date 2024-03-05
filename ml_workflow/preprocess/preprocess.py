@@ -9,7 +9,8 @@ from sklearn.pipeline import FeatureUnion
 from sklearn.linear_model import LogisticRegression
 from sklearn.feature_selection import SelectFromModel
 from sklearn.compose import ColumnTransformer
-from imblearn.pipeline import Pipeline
+#from imblearn.pipeline import Pipeline
+from sklearn.pipeline import Pipeline
 from joblib import Memory
 
 import marshal
