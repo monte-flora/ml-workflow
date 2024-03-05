@@ -9,7 +9,7 @@ import pandas as pd
 
 #sklearn 
 from sklearn.model_selection._validation import check_cv
-from sklearn.model_selection import KFold, GroupKFold, cross_val_score, GridSearchCV
+from sklearn.model_selection import KFold, GroupKFold, cross_val_score, GridSearchCV, RandomizedSearchCV
 from sklearn.utils import check_X_y, check_array, indexable, column_or_1d
 from sklearn.base import is_classifier
 from sklearn.base import (BaseEstimator, ClassifierMixin, RegressorMixin, clone,
@@ -19,8 +19,8 @@ from timeit import default_timer as timer
 import ast
 
 
-def _fit(estimator, X, y): 
-    return estimator.fit(X, y)
+def _fit(estimator, X, y, sample_weight): 
+    return estimator.fit(X, y, sample_weight)
 
 def _predict(estimator,X,y):
     return (estimator.predict_proba(X)[:,1], y)
@@ -99,7 +99,7 @@ class HyperOptCV:
                 return {f'model__{p}': values for p,values in search_space.items()}
 
     
-    def fit(self, X, y, groups=None):
+    def fit(self, X, y, groups=None, sample_weight=None):
         """Find the best hyperparameters using the hyperopt package
         
         Parameters
@@ -112,8 +112,13 @@ class HyperOptCV:
         groups : array-like, with shape (n_samples,), optional
             Group labels for the samples used while splitting the dataset into
             train/test set.
-        
+            
+        sample_weight: array-like of shape (n_samples,) default=None
+            Array of weights that are assigned to individual samples. 
+            If not provided, then each sample is given unit weight.
         """
+        self.sample_weight = sample_weight
+        
         # Using early stopping in the error minimization. Need to have 1% drop in loss every 8-10 count (varies)
         X, y = check_X_y(X, y, accept_sparse=['csc', 'csr', 'coo'],
                          force_all_finite=False, allow_nd=True)
@@ -138,18 +143,34 @@ class HyperOptCV:
 
             # Get the values of the optimal parameters
             self.best_params_ = space_eval(self._search_space, best)
-            
-        else:
-            # Perform a grid search over the hyperparameters using cross-validation
+        
+        
+        
+        else: 
             this_estimator = clone(self._estimator)
-            clf = GridSearchCV(this_estimator, 
+            if self.optimizer_ == 'grid_search':
+                # Perform a grid search over the hyperparameters using cross-validation
+                clf = GridSearchCV(this_estimator, 
                                self._search_space,
                                scoring=self._scorer,
                                n_jobs=self._n_jobs,
                                refit=False,
                                cv=self._cv,
                               )
-            clf.fit(self._X, self._y, groups=self._groups)
+            elif self.optimizer_ == 'random_search':
+                # Perform a random search over the hyperparameters using cross-validation
+                clf = RandomizedSearchCV(this_estimator, 
+                               self._search_space,
+                               n_iter = self._max_evals,
+                               scoring=self._scorer,
+                               n_jobs=self._n_jobs,
+                               refit=False,
+                               cv=self._cv,
+                                        
+                              )
+            
+            fit_params = {'model__sample_weight' : self.sample_weight}
+            clf.fit(self._X, self._y, groups=self._groups, **fit_params)
             
             # Renaming these results to be consistent with the output from the 
             # hyperopt results. 
@@ -183,7 +204,7 @@ class HyperOptCV:
                 data[param] = new_p
             else:
                 data[param] = params[param]
-            
+
         self.dataframe_.append(data)
         
     def objective(self, params):
@@ -201,6 +222,7 @@ class HyperOptCV:
 
         scores = cross_val_score(this_estimator, self._X, self._y, groups=self._groups, 
                                   scoring=self._scorer, cv=self._cv, n_jobs=self._n_jobs, 
+                                 fit_params= {'model__sample_weight' : self.sample_weight}, error_score='raise'
                                   )
             
         run_time = timer() - start
