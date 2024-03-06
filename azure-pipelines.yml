@@ -20,9 +20,9 @@ stages:
           vmImage: 'ubuntu-latest'
         strategy:
           matrix:
-            # Python36:
-            #   python.version: '3.6'
-            #   env_file: 'environment.yml'
+            Python36:
+              python.version: '3.10'
+              env_file: 'environment_py310.yml'
             Python38:
               python.version: '3.8'              
               env_file: 'environment_py38.yml'
