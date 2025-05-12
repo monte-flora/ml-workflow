@@ -13,7 +13,8 @@ parameters:
 
 variables:
 - group: ${{ parameters.vargroup }}
-  PACKAGE_VERSION: ${{ parameters.package_version }}.$(Build.BuildId)
+- name: PACKAGE_VERSION
+  value: ${{ parameters.package_version }}.$(Build.BuildId)
 
 stages:
 - stage: Build
@@ -71,7 +72,7 @@ stages:
           condition: eq(variables['AZ_DEVOPS_DEPLOY_GITHUB'], 'TRUE')
           inputs:
             gitHubConnection: $(AZ_DEVOPS_GITHUB_SERVICE_CONNECTION_NAME)
-            repositoryName: $(AZ_DEVOPS_GITHUB_ORGANIZATION_NAME)/ml_workflow
+            repositoryName: $(AZ_DEVOPS_GITHUB_ORGANIZATION_NAME)/frdd-ml-workflow
             isPreRelease: false
             tagSource: userSpecifiedTag
             assets: dist/*.whl
