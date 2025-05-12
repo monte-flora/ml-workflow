@@ -2,12 +2,17 @@ trigger:
 - main
 
 parameters:
+- name: vargroup
+  displayName: DevOps variable group
+  type: string
+  default: "wofs-pipeline-variables" 
 - name: package_version
   displayName: Package Version
   type: string
   default: 1.1
 
 variables:
+- group: ${{ parameters.vargroup }}
   PACKAGE_VERSION: ${{ parameters.package_version }}.$(Build.BuildId)
 
 stages:
@@ -15,9 +20,9 @@ stages:
   displayName: Build Package
   jobs:
       - job:
-        displayName: ubuntu-latest
+        displayName: $(DEFAULT_POOL_IMAGE)
         pool:
-          vmImage: 'ubuntu-latest'
+          vmImage: $(DEFAULT_POOL_IMAGE)
         strategy:
           matrix:
             Python310:
@@ -63,9 +68,10 @@ stages:
 
         - task: GithubRelease@1 
           displayName: 'Create GitHub Release'
+          condition: eq(variables['AZ_DEVOPS_DEPLOY_GITHUB'], 'TRUE')
           inputs:
-            gitHubConnection: WarnOnForecast-Github
-            repositoryName: WarnOnForecast/ml_workflow
+            gitHubConnection: $(AZ_DEVOPS_GITHUB_SERVICE_CONNECTION_NAME)
+            repositoryName: $(AZ_DEVOPS_GITHUB_ORGANIZATION_NAME)/ml_workflow
             isPreRelease: false
             tagSource: userSpecifiedTag
             assets: dist/*.whl
