@@ -2,8 +2,16 @@
 # a pre-processing pipeline, perform hyperparamter optimization, 
 # and calibration of the final model based on the user inputs. 
 
-from sklearnex import patch_sklearn
-patch_sklearn()
+##############################################
+import logging
+
+LOGGER  = logging.getLogger()
+
+try:
+    from sklearnex import patch_sklearn
+    patch_sklearn()
+except ModuleNotFoundError:
+    LOGGER.info(f'{__name__}: patch_sklearn() failed.')
 
 import numpy as np
 import pandas as pd
