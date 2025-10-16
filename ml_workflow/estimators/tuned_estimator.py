@@ -32,9 +32,9 @@ from sklearn.metrics import average_precision_score
 from sklearn.calibration import CalibratedClassifierCV
 
 # Internal methods 
-from .ml_methods import norm_aupdc, norm_csi
-from .preprocess.preprocess import PreProcessPipeline
-from .hyperparameter_optimizer import HyperOptCV
+from ..scoring.ml_methods import norm_aupdc, norm_csi
+from ..preprocess.preprocess import PreProcessPipeline
+from ..hyperopt.hyperparameter_optimizer import HyperOptCV
 
 def scorer(estimator, X, y):
     pred = estimator.predict_proba(X)[:,1]
@@ -107,7 +107,7 @@ class TunedEstimator(BaseEstimator, ClassifierMixin,
         
     def get_pipeline(self, estimator, return_cache=False):
         if self.pipeline_kwargs:
-            return PreProcessPipeline(**self.pipeline_kwargs).get_pipeline(estimator, return_cache)
+            return PreProcessPipeline(**self.pipeline_kwargs).get_pipeline(estimator)
 
         else:
             return estimator

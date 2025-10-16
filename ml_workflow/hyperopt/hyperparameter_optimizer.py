@@ -1,4 +1,9 @@
-# A python class for the hyperopt package in a scikit-learn-friendly format. 
+"""
+Hyperparameter Optimization with HyperOpt in scikit-learn format.
+
+This module provides a scikit-learn-compatible wrapper around the hyperopt library
+for Bayesian hyperparameter optimization, with fallback support for sklearn's grid and random search.
+"""
 
 from hyperopt.early_stop import no_progress_loss
 from hyperopt import fmin, tpe, atpe, hp, SparkTrials, STATUS_OK, Trials,space_eval
@@ -27,67 +32,170 @@ def _predict(estimator,X,y):
 
 class HyperOptCV:
     """
-    estimator : estimator instance, default=None
-        The estimator to perform hyperparameter optimization on. 
+    Scikit-learn style hyperparameter optimization using Bayesian methods (HyperOpt).
+    
+    This class wraps the hyperopt library to provide Tree-structured Parzen Estimator (TPE)
+    and Adaptive TPE optimization with a familiar sklearn interface. It also supports 
+    traditional grid and random search as fallback options.
+    
+    Parameters
+    ----------
+    estimator : estimator object
+        A scikit-learn estimator (or pipeline) that implements fit() and score() methods.
+        This is the model whose hyperparameters will be optimized.
         
     search_space : dict
-        Keys are the parameter names (strings) and values are lists or arrays of 
-        some combination of integers, floats, or categorical (strings/None) that are 
-        valid values for the given parameter. Represents search space
-        over parameters of the provided estimator.
+        Hyperparameter search space. Keys are parameter names (str), values define the 
+        search range:
         
-    optimizer : 'tpe', 'atpe', 'grid_search', 'random_search'
-        The optimizer option for hyperopt. If 'grid', then the uses the GridSearchCV in 
-        sklearn rather than bayesian. 
+        For TPE/ATPE optimizers:
+            - Lists: Converted to hp.choice() for categorical selection
+            - HyperOpt distributions: Use hp.uniform(), hp.loguniform(), etc. directly
+            
+        For grid/random search:
+            - Lists or arrays: Treated as discrete values to try
+            
+        Example for TPE:
+            {'max_depth': hp.quniform('max_depth', 2, 20, 1),
+             'learning_rate': hp.loguniform('learning_rate', -5, 0),
+             'n_estimators': [100, 200, 500]}
+             
+        Example for grid search:
+            {'max_depth': [5, 10, 15],
+             'learning_rate': [0.01, 0.1, 1.0]}
         
-    max_evals : integer 
-        Number of parameter settings that are sampled. n_iter trades
-        off runtime vs quality of the solution.
+    optimizer : {'tpe', 'atpe', 'grid_search', 'random_search'}, default='tpe'
+        Optimization strategy:
+        - 'tpe': Tree-structured Parzen Estimator (Bayesian optimization)
+        - 'atpe': Adaptive TPE (adjusts to optimization progress)
+        - 'grid_search': Exhaustive grid search (uses sklearn.GridSearchCV)
+        - 'random_search': Random sampling (uses sklearn.RandomizedSearchCV)
         
-    patience : integer 
-        The number of iterations in which the cross-validation score is expected to
-        improve, otherwise there is early stopping. 
+    max_evals : int, default=100
+        Maximum number of hyperparameter configurations to evaluate.
+        For Bayesian methods, this is the optimization budget.
+        For random_search, this is the number of random samples.
+        For grid_search, this is ignored (all combinations are tried).
         
-    scorer : callable of form (estimator, X, y) (default is None)
+    patience : int, default=10
+        Early stopping patience for Bayesian optimization. Stops if no improvement
+        in validation loss for this many consecutive iterations. Only applies to
+        TPE/ATPE optimizers.
         
-    n_jobs : integer 
-        Parallelization for the cross-validation 
+    scorer : callable or None, default=None
+        Scoring function of signature scorer(estimator, X, y). If None, uses the
+        estimator's default score() method. 
         
-    cv : int, cross-validation generator or an iterable, optional
-        Determines the cross-validation splitting strategy.
-        Possible inputs for cv are:
-          - None, to use the default 3-fold cross validation,
-          - integer, to specify the number of folds in a `(Stratified)KFold`,
-          - An object to be used as a cross-validation generator.
-          - An iterable yielding train, test splits.
-        For integer/None inputs, if the estimator is a classifier and ``y`` is
-        either binary or multiclass, :class:`StratifiedKFold` is used. In all
-        other cases, :class:`KFold` is used. 
+        Example:
+            from sklearn.metrics import make_scorer, roc_auc_score
+            scorer = make_scorer(roc_auc_score, needs_proba=True)
         
+    n_jobs : int, default=1
+        Number of parallel jobs for cross-validation. -1 uses all processors.
+        
+    cv : int, cross-validation generator, or iterable, default=None
+        Cross-validation strategy:
+        - None: Uses 5-fold stratified CV for classifiers, 5-fold CV for regressors
+        - int: Number of folds in (Stratified)KFold
+        - CV splitter object: e.g., KFold(n_splits=5, shuffle=True)
+        - Iterable: Yields (train_idx, test_idx) tuples
+        
+    output_fname : str or None, default=None
+        (Currently unused) Path to save optimization results.
     
+    Attributes
+    ----------
+    best_params_ : dict
+        Best hyperparameters found during optimization.
+        
+    dataframe_ : list of dict
+        History of all evaluated configurations with their scores and metadata.
+        
+    optimizer_ : str
+        The optimizer method being used.
+    
+    Examples
+    --------
+    >>> from sklearn.ensemble import RandomForestClassifier
+    >>> from sklearn.datasets import make_classification
+    >>> from hyperopt import hp
+    >>> 
+    >>> # Create sample data
+    >>> X, y = make_classification(n_samples=1000, n_features=20, random_state=42)
+    >>> 
+    >>> # Define model and search space
+    >>> rf = RandomForestClassifier(random_state=42)
+    >>> search_space = {
+    ...     'n_estimators': hp.quniform('n_estimators', 50, 500, 50),
+    ...     'max_depth': hp.quniform('max_depth', 3, 15, 1),
+    ...     'min_samples_split': [2, 5, 10]
+    ... }
+    >>> 
+    >>> # Optimize hyperparameters
+    >>> optimizer = HyperOptCV(
+    ...     estimator=rf,
+    ...     search_space=search_space,
+    ...     optimizer='tpe',
+    ...     max_evals=50,
+    ...     patience=10,
+    ...     cv=5,
+    ...     n_jobs=-1
+    ... )
+    >>> optimizer.fit(X, y)
+    >>> print(f"Best parameters: {optimizer.best_params_}")
+    
+    Notes
+    -----
+    - For imbalanced datasets, consider using sample_weight parameter in fit()
+    - TPE/ATPE are generally more efficient than grid/random search for large spaces
+    - The loss being minimized is the negative of the scorer (or negative score())
+    - Results are stored in dataframe_ for post-hoc analysis
+    
+    See Also
+    --------
+    sklearn.model_selection.GridSearchCV : Exhaustive grid search
+    sklearn.model_selection.RandomizedSearchCV : Random parameter search
+    hyperopt.fmin : Core HyperOpt optimization function
+    
+    References
+    ----------
+    .. [1] Bergstra, J., Yamins, D., Cox, D. (2013). "Making a Science of Model Search:
+           Hyperparameter Optimization in Hundreds of Dimensions for Vision Architectures."
+           ICML 2013.
     """
     def __init__(self, estimator, search_space, optimizer='tpe', max_evals=100, patience=10, 
                  scorer=None, n_jobs=1, cv=None, output_fname=None):
-        
+                    
         self._estimator = estimator
         self.optimizer_ = optimizer
         self._search_space = self._convert_search_space(search_space)
-
         self._algo = tpe.suggest if optimizer == 'tpe' else atpe.suggest
         self._max_evals = max_evals
         self._patience = patience
         self._trials = Trials()
         self._scorer = scorer 
-        self._iteration=0
+        self._iteration = 0
         self._n_jobs = n_jobs
-        self._cv =  cv
-    
+        self._cv = cv
         self.dataframe_ = []
     
     
     def _convert_search_space(self, search_space):
         """
-        Converts a parameter grid to a hyperopt-friendly format if provide a list.
+        Convert search space to optimizer-specific format.
+        
+        For TPE/ATPE: Converts lists to hp.choice() for categorical variables.
+        For grid/random search: Prefixes keys with 'model__' for pipeline compatibility.
+        
+        Parameters
+        ----------
+        search_space : dict
+            Original search space definition.
+            
+        Returns
+        -------
+        dict
+            Converted search space in optimizer-specific format.
         """
         for p, values in search_space.items():
             if self.optimizer_ in ['tpe', 'atpe']:
@@ -116,7 +224,19 @@ class HyperOptCV:
         sample_weight: array-like of shape (n_samples,) default=None
             Array of weights that are assigned to individual samples. 
             If not provided, then each sample is given unit weight.
-        """
+            
+        Returns
+        -------
+        self : object
+            Returns self with best_params_ attribute set.
+            
+        Notes
+        -----
+        After fitting, access optimization results via:
+        - self.best_params_: Best hyperparameters found
+        - self.dataframe_: Full optimization history
+        - self._trials: Raw HyperOpt trials object (for TPE/ATPE only)
+        """    
         self.sample_weight = sample_weight
         
         # Using early stopping in the error minimization. Need to have 1% drop in loss every 8-10 count (varies)
@@ -172,25 +292,37 @@ class HyperOptCV:
             fit_params = {'model__sample_weight' : self.sample_weight}
             clf.fit(self._X, self._y, groups=self._groups, **fit_params)
             
-            # Renaming these results to be consistent with the output from the 
-            # hyperopt results. 
-            self.dataframe_ = pd.DataFrame(clf.cv_results_)
-            cols_to_keep = ['mean_fit_time', 'mean_test_score', 'std_test_score', 'rank_test_score']
-
-            cols_to_keep += [col for col in self.dataframe_.columns if 'param_' in col]
-            self.dataframe_ = self.dataframe_[cols_to_keep]
-
-            rename_map = {'mean_fit_time' : 'train_time', 
-              'mean_test_score' : 'loss',
-              'std_test_score' : 'loss_variance', 
-              
-             }
-
-            self.dataframe_.rename(rename_map, axis=1, inplace=True)
+            # Convert sklearn results to consistent format
+            self._convert_sklearn_results(clf)
 
             # Remove the 'model' part of the keys:
             self.best_params_ = {param.split('__')[1] : val for param, val in clf.best_params_.items()}
-            
+   
+    def _convert_sklearn_results(self, search):
+        """
+        Convert sklearn CV results to HyperOpt-consistent format.
+        
+        Parameters
+        ----------
+        search : GridSearchCV or RandomizedSearchCV
+            Fitted sklearn search object.
+        """
+        df = pd.DataFrame(search.cv_results_)
+        
+        # Select relevant columns
+        cols_to_keep = ['mean_fit_time', 'mean_test_score', 'std_test_score', 'rank_test_score']
+        cols_to_keep += [col for col in df.columns if 'param_' in col]
+        df = df[cols_to_keep]
+        
+        # Rename to match HyperOpt format
+        df.rename(columns={
+            'mean_fit_time': 'train_time', 
+            'mean_test_score': 'loss',
+            'std_test_score': 'loss_variance',
+        }, inplace=True)
+        
+        self.dataframe_ = df
+
 
     def write_to_frame(self, data, params):
         """
@@ -208,7 +340,28 @@ class HyperOptCV:
         self.dataframe_.append(data)
         
     def objective(self, params):
-        """Objective function for Hyperparameter Optimization"""
+        """
+        Objective function for HyperOpt optimization.
+        
+        Evaluates a hyperparameter configuration using cross-validation and
+        returns the loss (negative score) to be minimized.
+        
+        Parameters
+        ----------
+        params : dict
+            Hyperparameter configuration to evaluate.
+            
+        Returns
+        -------
+        dict
+            Results dictionary with keys:
+            - 'loss': Mean CV score (to minimize)
+            - 'loss_variance': Variance of CV scores
+            - 'iteration': Current iteration number
+            - 'params': Parameters used
+            - 'train_time': Time taken for evaluation
+            - 'status': STATUS_OK for successful evaluation
+        """
         # Keep track of evals
         self._iteration += 1
         start = timer()
@@ -222,7 +375,7 @@ class HyperOptCV:
 
         scores = cross_val_score(this_estimator, self._X, self._y, groups=self._groups, 
                                   scoring=self._scorer, cv=self._cv, n_jobs=self._n_jobs, 
-                                 fit_params= {'model__sample_weight' : self.sample_weight}, error_score='raise'
+                                  params= {'model__sample_weight' : self.sample_weight}, error_score='raise'
                                   )
             
         run_time = timer() - start
@@ -240,7 +393,6 @@ class HyperOptCV:
 
         return {'loss': loss, 'loss_variance': loss_variance, 'iteration': self._iteration, 'params' : params,
                 'train_time': run_time, 'status': STATUS_OK}
-
 
 
 def convergence_plot(fname, param):

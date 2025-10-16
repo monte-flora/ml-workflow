@@ -1,3 +1,5 @@
+from typing import Literal, Optional, List
+
 import numpy as np 
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import RandomOverSampler
@@ -9,8 +11,8 @@ from sklearn.pipeline import FeatureUnion
 from sklearn.linear_model import LogisticRegression
 from sklearn.feature_selection import SelectFromModel
 from sklearn.compose import ColumnTransformer
-#from imblearn.pipeline import Pipeline
-from sklearn.pipeline import Pipeline
+from imblearn.pipeline import Pipeline as IMBPipeline
+from sklearn.pipeline import Pipeline as SKPipeline
 from joblib import Memory
 
 import marshal
@@ -18,118 +20,137 @@ from types import FunctionType
 from sklearn.base import BaseEstimator, TransformerMixin
 from tempfile import mkdtemp
 
+from dataclasses import dataclass
+from typing import Optional, Literal, List
+import numpy as np
+from sklearn.pipeline import Pipeline as SKPipeline
+from sklearn.impute import SimpleImputer, IterativeImputer
+from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler, OrdinalEncoder
+from sklearn.decomposition import PCA
+from sklearn.compose import ColumnTransformer
+from imblearn.pipeline import Pipeline as IMBPipeline
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.over_sampling import RandomOverSampler
+
+
+@dataclass
 class PreProcessPipeline:
+    """
+    PreProcessPipeline wraps sklearn estimators with preprocessing: 
+    imputation, scaling, PCA, and class resampling.
     
-    def __init__(self, imputer='simple', scaler='minmax',
-            pca=None, resample='under', numeric_features=None, categorical_features=None ): 
+    Args:
+        imputer: Method to handle missing data ('simple', 'iterative', or None)
+        imputer_kwargs: Custom kwargs for imputer (uses sensible defaults if None)
+        scaler: Feature scaling method ('standard', 'robust', 'minmax', or None)
+        pca: Whether to apply PCA dimensionality reduction
+        resample: Class resampling method ('under', 'over', or None)
+        numeric_features: List of numerical feature names
+        categorical_features: List of categorical feature names
+    """
+    imputer: Optional[Literal['simple', 'iterative']] = 'simple'
+    imputer_kwargs: Optional[dict] = None
+    scaler: Optional[Literal['minmax', 'standard', 'robust']] = 'standard'
+    pca: bool = False
+    resample: Optional[Literal['under', 'over']] = None
+    numeric_features: Optional[List[str]] = None
+    categorical_features: Optional[List[str]] = None
 
-        self.imputer_arg = imputer
-        self.scaler_arg = scaler
-        self.pca_arg = pca
-        self.resample_arg= resample
-        self._categorical_features=categorical_features
-        self._numeric_features=numeric_features
+    # Configuration for different components
+    _IMPUTERS = {
+        'simple': (SimpleImputer, {'missing_values': np.nan, 'strategy': 'median'}),
+        'iterative': (IterativeImputer, {
+            'random_state': 0, 'missing_values': np.nan, 'n_nearest_features': 10,
+            'initial_strategy': 'mean', 'skip_complete': True, 'min_value': -0.0001,
+            'max_value': 10000, 'tol': 0.01, 'max_iter': 5
+        })
+    }
+    
+    _SCALERS = {
+        'standard': StandardScaler,
+        'robust': RobustScaler,
+        'minmax': MinMaxScaler
+    }
+    
+    _RESAMPLERS = {
+        'under': RandomUnderSampler,
+        'over': RandomOverSampler
+    }
 
-    def get_pipeline(self, estimator, return_cache=False):
-        steps = self.get_steps()
-        
+    def __post_init__(self):
+        """Validate resampling requirement."""
+        if self.resample is not None:
+            try:
+                import imblearn
+            except ImportError:
+                raise ImportError("imbalanced-learn required for resampling")
+
+    def get_pipeline(self, estimator):
+        """Build complete pipeline with estimator."""
+        steps = self._build_steps()
         steps.append(('model', estimator))
         
-        if return_cache:
-            # Create a temporary folder to store the transformers of the pipeline
-            #cachedir = mkdtemp()
-            #memory = Memory(cachedir=cachedir, verbose=10)
-            return Pipeline(steps=steps)# memory=memory), cachedir 
-        else:
-            return Pipeline(steps=steps)
+        Pipeline = IMBPipeline if self.resample else SKPipeline
+        return Pipeline(steps=steps)
     
+    def _build_steps(self):
+        """Build preprocessing pipeline steps."""
+        # Build numeric transformers
+        numeric_transformers = []
         
-    def get_steps(self):
-        # Pre-processing order : Imputer, Normalize, PCA, Resample, 
-        method_args = [self.imputer_arg, self.scaler_arg, self.pca_arg,]        
-        method_order = ['imputer', 'scaler', 'pca_transform']
-
-        numeric_transformers = [ ]
-        for arg, method in zip(method_args, method_order):
-            if arg is not None:
-                func = getattr(self, method)
-                numeric_transformers.append(func(arg))
-
-        if self._categorical_features is not None:
-            encoder = OrdinalEncoder(handle_unknown="use_encoded_value", 
-                                    unknown_value=np.nan)
-            categorical_transformers = [('encoder', encoder)] + numeric_transformers
-                     
-            transformer = ColumnTransformer(
-                transformers=[
-                    ("num", Pipeline(numeric_transformers), self._numeric_features),
-                    ("cat", Pipeline(categorical_transformers), self._categorical_features),
-                    ]
-                )
+        if self.imputer:
+            numeric_transformers.append(self._make_imputer())
+        if self.scaler:
+            numeric_transformers.append(self._make_scaler())
+        if self.pca:
+            numeric_transformers.append(('pca', PCA()))
         
-            steps = [("preprocessor", transformer)]
+        # Handle categorical features if specified
+        if self.categorical_features:
+            steps = [self._make_column_transformer(numeric_transformers)]
         else:
             steps = numeric_transformers
         
+        # Add resampling if specified
+        if self.resample:
+            steps.append(self._make_resampler())
         
-        if self.resample_arg is not None:
-            steps.append(self.resample(self.resample_arg))
-        
-          
         return steps
 
-    def resample(self, method=None):
-        """
-        Resamples a dataset to 1:1 using the imblearn python package
-        by either random over or under sampling. 
-        """
-        if method == 'under':
-            resampler = RandomUnderSampler(random_state=42)
-        elif method == 'over':
-            resampler = RandomOverSampler(random_state=42)
+    def _make_imputer(self):
+        """Create imputer step."""
+        imputer_class, default_kwargs = self._IMPUTERS[self.imputer]
+        kwargs = self.imputer_kwargs or default_kwargs
+        return ('imputer', imputer_class(**kwargs))
 
-        return ('resampler', resampler)
+    def _make_scaler(self):
+        """Create scaler step."""
+        scaler_class = self._SCALERS[self.scaler]
+        return ('scaler', scaler_class())
 
-    def imputer(self,method=None):
-        """
-        Imputation transformer for missing values.
-        """
-        if method == 'simple':
-            imputer = SimpleImputer(
-                missing_values=np.nan, strategy="median"
-            )
-        elif method == 'iterative':
-            imputer = IterativeImputer(random_state=0, missing_values=np.nan, 
-                          n_nearest_features=10, initial_strategy='mean', 
-                          skip_complete=True, min_value = -0.0001, 
-                           tol = 0.01,
-                          max_value = 10000,
-                           max_iter=5, 
-                          )
+    def _make_resampler(self):
+        """Create resampler step."""
+        resampler_class = self._RESAMPLERS[self.resample]
+        return ('resampler', resampler_class(random_state=42))
 
-        return ('imputer', imputer)
-
-    def pca_transform(self, method=None):
-        """
-        Peforms Principal Component Analysis on the examples
-        """
-        # Make an instance of the Model
-        pca = PCA( )
-
-        return ('pca', pca) 
-
-    def scaler(self, method=None):
-        """
-        Scaling a dataset.
-        """
-        if method == 'standard':
-            scaler = StandardScaler()
-        elif method == 'robust':
-            scaler = RobustScaler()
-        elif method == 'minmax':
-            scaler = MinMaxScaler()
+    def _make_column_transformer(self, numeric_transformers):
+        """Create column transformer for mixed numeric/categorical features."""
+        # Categorical pipeline: encode then apply numeric transforms
+        categorical_pipeline = [
+            ('encoder', OrdinalEncoder(
+                handle_unknown="use_encoded_value", 
+                unknown_value=np.nan
+            ))
+        ] + numeric_transformers
         
-        return ('scaler', scaler) 
+        transformer = ColumnTransformer(
+            transformers=[
+                ("num", SKPipeline(numeric_transformers), self.numeric_features),
+                ("cat", SKPipeline(categorical_pipeline), self.categorical_features),
+            ]
+        )
+        
+        return ("preprocessor", transformer)
 
     
 class CorrelationFilter:
