@@ -23,7 +23,7 @@ pip install -e .
 
 
 ### Using ml_workflow 
-```
+```python
 from ml_workflow import TunedEstimator
 from sklearn.ensemble import HistGradientBoostingRegressor
 
